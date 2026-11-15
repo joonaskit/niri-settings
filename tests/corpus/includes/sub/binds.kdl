@@ -1,0 +1,5 @@
+binds {
+    Mod+T hotkey-overlay-title="Terminal" { spawn "foot"; }
+    Mod+Shift+Slash { show-hotkey-overlay; }
+    XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+"; }
+}

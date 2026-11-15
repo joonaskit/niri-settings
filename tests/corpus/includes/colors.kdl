@@ -1,0 +1,9 @@
+layout {
+    gaps 20
+    focus-ring { active-color "blue"; }
+    struts { left 64; }
+}
+window-rule {
+    match title="Picture-in-Picture"
+    open-floating true
+}
