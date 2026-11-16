@@ -138,7 +138,8 @@ niri_settings/
                  the action catalogue; window-rule matchers, properties and templates
   qml/           Theme.qml (style tokens), shared controls, pages, the first-run dialog
   fonts/         Inter and JetBrains Mono (OFL), so the app looks the same everywhere
-data/            desktop entry, icon and AppStream metainfo
+data/            desktop entry and AppStream metainfo
+icons/           app icon: full size, a simpler one for 16–32 px, and a symbolic one
 packaging/       the Fedora RPM spec and how to release (packaging/README.md)
 .copr/Makefile   builds a source RPM for COPR from a git checkout
 tests/

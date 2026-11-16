@@ -179,6 +179,12 @@ class Packaging(unittest.TestCase):
             run = subprocess.run(["desktop-file-validate", path], capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
+    def test_every_icon_is_installed(self):
+        with open(os.path.join(ROOT, "packaging", "niri-settings.spec"), encoding="utf-8") as fh:
+            spec = fh.read()
+        for name in os.listdir(os.path.join(ROOT, "icons")):
+            self.assertIn(f"icons/{name}", spec, f"{name} is not installed by the spec")
+
     def test_metainfo_validates(self):
         if not shutil.which("appstreamcli"):
             self.skipTest("needs appstreamcli")

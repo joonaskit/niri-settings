@@ -47,7 +47,13 @@ a live preview, a diff of unsaved changes and snapshots of every save.
 %pyproject_install
 %pyproject_save_files -l niri_settings
 install -Dpm 0644 data/%{appid}.desktop %{buildroot}%{_datadir}/applications/%{appid}.desktop
-install -Dpm 0644 data/%{appid}.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
+install -Dpm 0644 icons/niri-settings.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
+for size in 16 24 32; do
+    install -Dpm 0644 icons/niri-settings-small.svg \
+        %{buildroot}%{_datadir}/icons/hicolor/${size}x${size}/apps/%{appid}.svg
+done
+install -Dpm 0644 icons/niri-settings-symbolic.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/symbolic/apps/%{appid}-symbolic.svg
 install -Dpm 0644 data/%{appid}.metainfo.xml %{buildroot}%{_metainfodir}/%{appid}.metainfo.xml
 
 %check
@@ -60,7 +66,8 @@ export QT_QPA_PLATFORM=offscreen
 %doc README.md
 %{_bindir}/niri-settings
 %{_datadir}/applications/%{appid}.desktop
-%{_datadir}/icons/hicolor/scalable/apps/%{appid}.svg
+%{_datadir}/icons/hicolor/*/apps/%{appid}.svg
+%{_datadir}/icons/hicolor/symbolic/apps/%{appid}-symbolic.svg
 %{_metainfodir}/%{appid}.metainfo.xml
 
 %changelog
