@@ -59,11 +59,9 @@ class Base(unittest.TestCase):
 
 class Schema(unittest.TestCase):
     def test_every_page_in_the_sidebar_is_built(self):
-        custom = {"layout", "displays", "binds", "window-rules", "files"}
+        custom = {"layout", "displays", "binds", "window-rules", "layer-rules", "files"}
         for _, items in SECTIONS:
             for page_id, title in items:
-                if page_id == "layer-rules":
-                    continue  # issue #8; layer-rule is listed as source only
                 self.assertTrue(page_id in custom or page_id in pages.PAGES, page_id)
 
     def test_settings_are_well_formed(self):
@@ -106,6 +104,7 @@ class Schema(unittest.TestCase):
         self.assertEqual(pages.page_for("input/touchpad/tap"), "pointer")
         self.assertEqual(pages.page_for("input/keyboard/xkb"), "keyboard")
         self.assertEqual(pages.page_for("window-rule#2/match#0"), "window-rules")
+        self.assertEqual(pages.page_for("layer-rule#0/opacity"), "layer-rules")
         self.assertEqual(pages.page_for("binds/Mod+T"), "binds")
         self.assertEqual(pages.page_for("output[DP-1]/scale"), "displays")
         self.assertEqual(pages.page_for("animations/window-open/spring"), "animations")

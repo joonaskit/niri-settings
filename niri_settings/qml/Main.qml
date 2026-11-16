@@ -194,6 +194,7 @@ ApplicationWindow {
                                : window.currentPage === "displays" ? displaysPage
                                : window.currentPage === "binds" ? bindsPage
                                : window.currentPage === "window-rules" ? rulesPage
+                               : window.currentPage === "layer-rules" ? layerRulesPage
                                : backend.pages[window.currentPage] !== undefined ? settingsPage : placeholder
             }
             Component { id: layoutPage; LayoutPage {} }
@@ -210,7 +211,8 @@ ApplicationWindow {
             }
             Component { id: displaysPage; DisplaysPage {} }
             Component { id: bindsPage; KeyBindingsPage {} }
-            Component { id: rulesPage; WindowRulesPage {} }
+            Component { id: rulesPage; RulesPage { view: rules } }
+            Component { id: layerRulesPage; RulesPage { view: layerRules } }
             Component { id: placeholder; PlaceholderPage { title: window.currentTitle } }
         }
 

@@ -3,12 +3,23 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "."
 
-// Window rules: the list in niri's order, a match / apply builder for the
-// selected rule, and the open windows with the rules that touch each one.
+// Window rules or layer rules: the list in niri's order, a match / apply
+// builder for the selected rule, and the open windows (or layer surfaces) with
+// the rules that touch each one. `view` is a RulesView or LayerRulesView.
 Item {
     id: page
-    readonly property var detail: rules.detail
-    readonly property var why: rules.why
+    required property var view
+    readonly property var detail: page.view.detail
+    readonly property var why: page.view.why
+    readonly property var words: page.view.words
+
+    // niri does not stream layer surfaces; the view polls while the page is shown.
+    Timer {
+        interval: 2000
+        repeat: true
+        running: page.view.connected
+        onTriggered: page.view.poll()
+    }
 
     function statusMark(status) {
         return status === "yes" ? "✓" : status === "maybe" ? "?" : status === "no" ? "–" : ""
@@ -29,7 +40,7 @@ Item {
                 anchors.rightMargin: 28
                 spacing: 12
                 Text {
-                    text: "Window rules"
+                    text: page.words.title
                     font.pixelSize: Theme.pageTitle
                     font.weight: Font.Bold
                     font.letterSpacing: -0.44
@@ -44,14 +55,15 @@ Item {
                     elide: Text.ElideRight
                 }
                 Btn {
-                    text: rules.picking ? "Click a window…" : "Pick a window…"
-                    enabled: rules.connected && !rules.picking
-                    onClicked: rules.pickWindow()
+                    visible: page.view.canPick
+                    text: page.view.picking ? "Click a window…" : "Pick a window…"
+                    enabled: page.view.connected && !page.view.picking
+                    onClicked: page.view.pickWindow()
                 }
                 Btn {
                     text: "+ New rule"
                     primary: true
-                    onClicked: rules.newRule("blank")
+                    onClicked: page.view.newRule("blank")
                 }
             }
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
@@ -80,18 +92,18 @@ Item {
                             Layout.fillWidth: true
                             Layout.leftMargin: 12
                             Layout.rightMargin: 12
-                            visible: rules.rules.length === 0
+                            visible: page.view.rules.length === 0
                             wrapMode: Text.Wrap
                             font.pixelSize: Theme.secondary
                             color: Theme.muted
-                            text: "No window rules yet. Start from a template below or press New rule."
+                            text: "No " + page.words.title.toLowerCase() + " yet. Start from a template below or press New rule."
                         }
                         Repeater {
-                            model: rules.rules
+                            model: page.view.rules
                             AbstractButton {
                                 id: ruleRow
                                 required property var modelData
-                                readonly property bool current: modelData.index === rules.selected
+                                readonly property bool current: modelData.index === page.view.selected
                                 property real radius: Theme.radius
                                 Layout.fillWidth: true
                                 Layout.leftMargin: 12
@@ -100,10 +112,10 @@ Item {
                                 Accessible.role: Accessible.ListItem
                                 Accessible.name: modelData.title + ", " + modelData.subtitle
                                                  + (modelData.disabled ? ", turned off" : "")
-                                                 + (modelData.status === "yes" ? ", applies to the selected window"
-                                                    : modelData.status === "maybe" ? ", may apply to the selected window" : "")
+                                                 + (modelData.status === "yes" ? ", applies to the selected " + page.words.one
+                                                    : modelData.status === "maybe" ? ", may apply to the selected " + page.words.one : "")
                                 Accessible.selected: current
-                                onClicked: rules.select(modelData.index)
+                                onClicked: page.view.select(modelData.index)
                                 contentItem: RowLayout {
                                     spacing: 8
                                     ColumnLayout {
@@ -165,7 +177,7 @@ Item {
                             text: "Start from a template"
                         }
                         Repeater {
-                            model: rules.templates
+                            model: page.view.templates
                             AbstractButton {
                                 id: tpl
                                 required property var modelData
@@ -179,8 +191,9 @@ Item {
                                 ToolTip.visible: hovered
                                 ToolTip.delay: 500
                                 ToolTip.text: modelData.description
-                                                + (modelData.needsApp ? " Pick or select a window first to use its app-id." : "")
-                                onClicked: rules.newRule(modelData.id)
+                                                + (modelData.needsApp ? " Select a " + page.words.one + " first to use its "
+                                                                      + page.words.fill[0].key + "." : "")
+                                onClicked: page.view.newRule(modelData.id)
                                 contentItem: Text {
                                     id: tplText
                                     text: tpl.modelData.title
@@ -226,8 +239,7 @@ Item {
                             wrapMode: Text.Wrap
                             font.pixelSize: Theme.secondary
                             color: Theme.muted
-                            text: "Window rules change how particular windows open and look: floating, size, "
-                                  + "the workspace or output they open on, opacity, borders and more."
+                            text: page.words.intro
                         }
 
                         // Name, place in the list and where it is written
@@ -243,7 +255,7 @@ Item {
                                 placeholderText: page.detail.title || "Name this rule"
                                 text: page.detail.comment || ""
                                 Accessible.name: "Rule name, written as a comment above the rule"
-                                onEditingFinished: if (text !== (page.detail.comment || "")) rules.rename(text)
+                                onEditingFinished: if (text !== (page.detail.comment || "")) page.view.rename(text)
                                 background: Rectangle {
                                     radius: Theme.radius
                                     color: nameField.activeFocus ? Theme.raised : "transparent"
@@ -257,7 +269,7 @@ Item {
                                 ToolTip.visible: hovered; ToolTip.delay: 500
                                 ToolTip.text: on ? "Turn off: comments the rule out with /-, so niri skips it"
                                                  : "Turn on: removes the /- in front of the rule"
-                                onClicked: rules.setEnabled(page.detail.index, !on)
+                                onClicked: page.view.setEnabled(page.detail.index, !on)
                             }
                             Btn {
                                 implicitWidth: 36; leftPadding: 0; rightPadding: 0
@@ -265,7 +277,7 @@ Item {
                                 enabled: page.detail.first === false
                                 Accessible.name: "Move rule up"
                                 ToolTip.visible: hovered; ToolTip.delay: 500; ToolTip.text: "Move up: earlier rules lose to later ones"
-                                onClicked: rules.moveRule(-1)
+                                onClicked: page.view.moveRule(-1)
                             }
                             Btn {
                                 implicitWidth: 36; leftPadding: 0; rightPadding: 0
@@ -273,9 +285,9 @@ Item {
                                 enabled: page.detail.last === false
                                 Accessible.name: "Move rule down"
                                 ToolTip.visible: hovered; ToolTip.delay: 500; ToolTip.text: "Move down: later rules win"
-                                onClicked: rules.moveRule(1)
+                                onClicked: page.view.moveRule(1)
                             }
-                            Btn { text: "Remove"; onClicked: rules.removeRule() }
+                            Btn { text: "Remove"; onClicked: page.view.removeRule() }
                         }
                         Banner {
                             Layout.fillWidth: true
@@ -287,7 +299,7 @@ Item {
                             visible: page.detail.has === true
                             Layout.topMargin: -12
                             config: page.detail.where || ""
-                            plain: "applies when you save; open-time settings affect windows opened after that"
+                            plain: page.words.saved
                         }
 
                         Text {
@@ -299,17 +311,17 @@ Item {
                             text: page.detail.error || ""
                         }
 
-                        // When a window matches
+                        // When a window or surface matches
                         Card {
                             visible: page.detail.has === true
-                            GroupLabel { text: "When a window matches" }
+                            GroupLabel { text: "When a " + page.words.one + " matches" }
                             Text {
                                 Layout.fillWidth: true
-                                visible: page.detail.allWindows === true
+                                visible: page.detail.matchesAll === true
                                 wrapMode: Text.Wrap
                                 font.pixelSize: Theme.secondary
                                 color: Theme.muted
-                                text: "No match line: this rule applies to every window"
+                                text: "No match line: this rule applies to every " + page.words.one
                                       + ((page.detail.directives || []).length ? ", except the ones below." : ".")
                             }
                             Repeater {
@@ -352,10 +364,20 @@ Item {
                                                     font.family: Theme.mono
                                                     font.pixelSize: Theme.config
                                                     text: field.modelData.kind === "regex" ? field.modelData.value : ""
-                                                    placeholderText: "regex, e.g. ^firefox$"
+                                                    placeholderText: "regex, e.g. " + field.modelData.example
                                                     Accessible.name: line.modelData.kind + " " + field.modelData.label + " regex"
                                                     onEditingFinished: if (text !== field.modelData.value)
-                                                        rules.setMatcher(line.modelData.kind, line.modelData.index, field.modelData.key, text)
+                                                        page.view.setMatcher(line.modelData.kind, line.modelData.index, field.modelData.key, text)
+                                                }
+                                                Select {
+                                                    visible: field.modelData.kind === "enum"
+                                                    width: 130
+                                                    model: field.modelData.options
+                                                    current: field.modelData.kind === "enum" ? field.modelData.value : ""
+                                                    Accessible.name: line.modelData.kind + " " + field.modelData.label
+                                                    onPicked: function(value) {
+                                                        page.view.setMatcher(line.modelData.kind, line.modelData.index, field.modelData.key, value)
+                                                    }
                                                 }
                                                 Select {
                                                     visible: field.modelData.kind === "bool"
@@ -364,14 +386,14 @@ Item {
                                                     current: field.modelData.kind === "bool" ? String(field.modelData.value) : ""
                                                     Accessible.name: line.modelData.kind + " " + field.modelData.label
                                                     onPicked: function(value) {
-                                                        rules.setMatcher(line.modelData.kind, line.modelData.index, field.modelData.key, value === "true")
+                                                        page.view.setMatcher(line.modelData.kind, line.modelData.index, field.modelData.key, value === "true")
                                                     }
                                                 }
                                                 Btn {
                                                     width: 36; leftPadding: 0; rightPadding: 0
                                                     text: "×"
                                                     Accessible.name: "Remove " + field.modelData.label + " from this line"
-                                                    onClicked: rules.removeMatcher(line.modelData.kind, line.modelData.index, field.modelData.key)
+                                                    onClicked: page.view.removeMatcher(line.modelData.kind, line.modelData.index, field.modelData.key)
                                                 }
                                             }
                                         }
@@ -382,7 +404,7 @@ Item {
                                             current: ""
                                             Accessible.name: "Add a condition to this line"
                                             onPicked: function(value) {
-                                                if (value) rules.addMatcher(line.modelData.kind, line.modelData.index, value)
+                                                if (value) page.view.addMatcher(line.modelData.kind, line.modelData.index, value)
                                                 current = ""; currentIndex = 0
                                             }
                                         }
@@ -413,48 +435,47 @@ Item {
                                         font.pixelSize: Theme.hint
                                         readonly property bool exclude: line.modelData.kind === "exclude"
                                         color: line.modelData.status !== "yes" ? Theme.muted : exclude ? Theme.warnText : Theme.okInline
-                                        text: line.modelData.status === "yes" ? (exclude ? "✕ This line excludes the selected window"
-                                                                                         : "✓ The selected window fits this line")
-                                            : line.modelData.status === "maybe" ? "? Cannot tell whether the selected window fits this line"
-                                            : "– The selected window does not fit this line"
+                                        text: line.modelData.status === "yes" ? (exclude ? "✕ This line excludes the selected " + page.words.one
+                                                                                         : "✓ The selected " + page.words.one + " fits this line")
+                                            : line.modelData.status === "maybe" ? "? Cannot tell whether the selected " + page.words.one + " fits this line"
+                                            : "– The selected " + page.words.one + " does not fit this line"
                                     }
                                 }
                             }
                             Flow {
                                 Layout.fillWidth: true
                                 spacing: 8
-                                Btn { text: "+ Match"; onClicked: rules.addDirective("match") }
-                                Btn { text: "+ Exclude…"; onClicked: rules.addDirective("exclude") }
-                                Btn {
-                                    visible: page.why.has === true
-                                    text: "Use window's app-id"
-                                    onClicked: rules.fillFromWindow("app-id")
-                                }
-                                Btn {
-                                    visible: page.why.has === true
-                                    text: "Use window's title"
-                                    onClicked: rules.fillFromWindow("title")
+                                Btn { text: "+ Match"; onClicked: page.view.addDirective("match") }
+                                Btn { text: "+ Exclude…"; onClicked: page.view.addDirective("exclude") }
+                                Repeater {
+                                    model: page.words.fill
+                                    Btn {
+                                        required property var modelData
+                                        visible: page.why.has === true
+                                        text: modelData.label
+                                        onClicked: page.view.fillFromTarget(modelData.key)
+                                    }
                                 }
                             }
                             Hint {
-                                plain: page.why.has ? "The buttons copy the selected window's real values into the first match line as exact regexes."
-                                                    : "app-id and title are regexes matched anywhere in the text. Select a window on the right to fill them from its real values."
+                                plain: page.why.has ? page.words.fillHint : page.words.matchHint
                             }
                         }
 
                         // Then
                         Card {
                             visible: page.detail.has === true
-                            GroupLabel { text: "Then, when it opens" }
+                            GroupLabel { visible: page.words.hasOpen; text: "Then, when it opens" }
                             Text {
                                 Layout.fillWidth: true
-                                visible: (page.detail.open || []).length === 0
+                                visible: page.words.hasOpen && (page.detail.open || []).length === 0
                                 font.pixelSize: Theme.secondary
                                 color: Theme.muted
                                 text: "Nothing set for opening."
                             }
                             GridLayout {
                                 Layout.fillWidth: true
+                                visible: page.words.hasOpen
                                 columns: width > 620 ? 2 : 1
                                 columnSpacing: 12
                                 rowSpacing: 12
@@ -465,18 +486,21 @@ Item {
                                         Layout.fillWidth: true
                                         Layout.columnSpan: modelData.wide && parent.columns > 1 ? 2 : 1
                                         item: modelData
-                                        onEdited: function(value) { rules.setProp(modelData.path, value) }
-                                        onRemoved: rules.removeProp(modelData.path)
+                                        onEdited: function(value) { page.view.setProp(modelData.path, value) }
+                                        onRemoved: page.view.removeProp(modelData.path)
                                     }
                                 }
                             }
-                            GroupLabel { Layout.topMargin: 6; text: "And while it is open" }
+                            GroupLabel {
+                                Layout.topMargin: page.words.hasOpen ? 6 : 0
+                                text: page.words.hasOpen ? "And while it is open" : "Then"
+                            }
                             Text {
                                 Layout.fillWidth: true
                                 visible: (page.detail.always || []).length === 0
                                 font.pixelSize: Theme.secondary
                                 color: Theme.muted
-                                text: "Nothing set while open."
+                                text: page.words.hasOpen ? "Nothing set while open." : "Nothing set yet."
                             }
                             GridLayout {
                                 Layout.fillWidth: true
@@ -490,8 +514,8 @@ Item {
                                         Layout.fillWidth: true
                                         Layout.columnSpan: modelData.wide && parent.columns > 1 ? 2 : 1
                                         item: modelData
-                                        onEdited: function(value) { rules.setProp(modelData.path, value) }
-                                        onRemoved: rules.removeProp(modelData.path)
+                                        onEdited: function(value) { page.view.setProp(modelData.path, value) }
+                                        onRemoved: page.view.removeProp(modelData.path)
                                     }
                                 }
                             }
@@ -503,7 +527,7 @@ Item {
                                 font.pixelSize: Theme.secondary
                                 Accessible.name: "Add a property to this rule"
                                 onPicked: function(value) {
-                                    if (value) rules.addProp(value)
+                                    if (value) page.view.addProp(value)
                                     current = ""; currentIndex = 0
                                 }
                             }
@@ -540,7 +564,7 @@ Item {
 
             Rectangle { Layout.fillHeight: true; implicitWidth: 1; color: Theme.line }
 
-            // Open windows and the "why" view
+            // Open windows or surfaces, and the "why" view
             Rectangle {
                 Layout.fillHeight: true
                 implicitWidth: 270
@@ -559,7 +583,7 @@ Item {
                             spacing: 10
 
                             Text {
-                                text: "Open windows"
+                                text: page.words.listTitle
                                 font.pixelSize: Theme.panelTitle
                                 font.weight: Font.Bold
                                 color: Theme.text
@@ -570,12 +594,12 @@ Item {
                                 wrapMode: Text.Wrap
                                 font.pixelSize: Theme.hint
                                 color: Theme.muted
-                                text: !rules.connected ? "niri is not running, so there are no windows to match against."
-                                    : rules.windows.length === 0 ? "No windows are open."
-                                    : "Live from niri IPC · ✓ marks windows the selected rule applies to"
+                                text: !page.view.connected ? page.words.offline
+                                    : page.view.targets.length === 0 ? page.words.none
+                                    : "Live from niri IPC · ✓ marks " + page.words.many + " the selected rule applies to"
                             }
                             Repeater {
-                                model: rules.windows
+                                model: page.view.targets
                                 AbstractButton {
                                     id: win
                                     required property var modelData
@@ -585,13 +609,13 @@ Item {
                                     implicitHeight: winText.implicitHeight + 20
                                     leftPadding: 10; rightPadding: 10
                                     Accessible.role: Accessible.ListItem
-                                    Accessible.name: modelData.title + ", " + modelData.appId
+                                    Accessible.name: modelData.title + ", " + modelData.subtitle
                                                      + (hit ? ", matches the selected rule" : modelData.status === "maybe" ? ", may match the selected rule" : "")
                                     Accessible.selected: modelData.selected
                                     ToolTip.visible: hovered && modelData.reason !== ""
                                     ToolTip.delay: 500
                                     ToolTip.text: modelData.reason
-                                    onClicked: rules.selectWindow(modelData.id)
+                                    onClicked: page.view.selectTarget(modelData.id)
                                     contentItem: ColumnLayout {
                                         id: winText
                                         spacing: 2
@@ -605,7 +629,7 @@ Item {
                                         }
                                         Text {
                                             Layout.fillWidth: true
-                                            text: win.modelData.appId + " · " + win.modelData.workspace
+                                            text: win.modelData.subtitle
                                             elide: Text.ElideRight
                                             font.family: Theme.mono
                                             font.pixelSize: Theme.groupLabel
@@ -641,7 +665,7 @@ Item {
                                 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: page.why.appId || ""
+                                    text: page.why.subtitle || ""
                                     elide: Text.ElideRight
                                     font.family: Theme.mono
                                     font.pixelSize: Theme.groupLabel
@@ -659,7 +683,7 @@ Item {
                                         leftPadding: 8; rightPadding: 8
                                         Accessible.name: modelData.title + ": " + (modelData.status === "yes" ? "applies" : modelData.status === "maybe" ? "may apply" : "does not apply")
                                                          + ", " + modelData.reason
-                                        onClicked: rules.select(modelData.index)
+                                        onClicked: page.view.select(modelData.index)
                                         contentItem: RowLayout {
                                             id: whyText
                                             spacing: 8
@@ -706,7 +730,7 @@ Item {
                                     wrapMode: Text.Wrap
                                     font.pixelSize: Theme.secondary
                                     color: Theme.muted
-                                    text: "No rule sets anything for this window; it follows the layout settings."
+                                    text: page.words.noValues
                                 }
                                 Repeater {
                                     model: page.why.values || []
@@ -746,8 +770,8 @@ Item {
                                 }
                                 Btn {
                                     Layout.topMargin: 6
-                                    text: "Deselect window"
-                                    onClicked: rules.selectWindow(-1)
+                                    text: "Deselect " + page.words.one
+                                    onClicked: page.view.selectTarget(-1)
                                 }
                             }
                         }

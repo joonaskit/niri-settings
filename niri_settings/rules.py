@@ -1,9 +1,13 @@
-"""Window rules as a model, without Qt: matching, merging and editing.
+"""Window and layer rules as a model, without Qt: matching, merging and editing.
 
-Matching follows niri: a rule applies when the window matches any `match`
+Both kinds of rule work the same way and differ only in their schema
+(schema/window_rules.py, schema/layer_rules.py), which every function here
+takes as `kind`, the window schema by default.
+
+Matching follows niri: a rule applies when the window (or surface) matches any `match`
 directive (or there are none) and no `exclude` directive. All matchers in
 one directive must hold. `app-id` and `title` are Rust regexes searched
-anywhere in the string; syntax Python's `re` lacks is handed to the `regex`
+anywhere in the string (as is a layer's `namespace`); syntax Python's `re` lacks is handed to the `regex`
 package when it is installed. A matcher that cannot be checked from IPC state
 (or a regex neither can reproduce) gives "unknown" instead of a guess, so a
 rule is shown as applying, not applying, or maybe applying.
@@ -24,14 +28,15 @@ import re
 from dataclasses import dataclass
 
 from . import niri_core
-from .schema import window_rules as schema
+from .schema import layer_rules as LAYER
+from .schema import window_rules as WINDOW
 
 try:
     import regex as _regex      # optional: Unicode classes, class set operations, scoped flags
 except ImportError:
     _regex = None
 
-NAME = "window-rule"
+NAME = WINDOW.NAME
 YES, NO, MAYBE = "yes", "no", "maybe"
 
 # --------------------------------------------------------------------------
@@ -331,6 +336,29 @@ def cast_targets(reply) -> set | None:
     return found
 
 
+def layer_facts(layers, clock: dict | None = None) -> dict:
+    """key -> facts for every open layer surface, from a `Layers` reply list.
+
+    niri gives layer surfaces no id, so the key is `namespace@output:layer`,
+    with `#2`, `#3` added for repeats. at-startup is taken as it is now, which
+    assumes niri rechecks layer rules when its first minute ends.
+    """
+    at_startup = startup(None, clock)[0]
+    out: dict[str, dict] = {}
+    for layer in layers if isinstance(layers, list) else []:
+        if not isinstance(layer, dict):
+            continue
+        ns, level = layer.get("namespace") or "", str(layer.get("layer") or "").lower() or None
+        key = base = f"{ns}@{layer.get('output') or '?'}:{level or '?'}"
+        n = 1
+        while key in out:
+            n += 1
+            key = f"{base}#{n}"
+        out[key] = {"namespace": ns, "layer": level, "at-startup": at_startup,
+                    "_output": layer.get("output") or ""}
+    return out
+
+
 # --------------------------------------------------------------------------
 # Matching
 
@@ -349,31 +377,40 @@ def _or(results):
     return MAYBE if MAYBE in results else NO
 
 
-def check_matcher(key: str, wanted, f: dict) -> tuple[str, str]:
-    """(yes/no/maybe, a short explanation) for one matcher against one window."""
+def _regex_keys(kind) -> set[str]:
+    return {m["key"] for m in kind.MATCHERS if m["kind"] == "regex"}
+
+
+def check_matcher(key: str, wanted, f: dict, kind=WINDOW) -> tuple[str, str]:
+    """(yes/no/maybe, a short explanation) for one matcher against one window or surface."""
     have = f.get(key)
-    if key in ("app-id", "title"):
+    known = kind.MATCHER_KEYS.get(key, {"label": key, "kind": ""})
+    if known["kind"] == "regex":
         if have is None:
-            return NO, f"the window has no {key}"
+            return NO, f"the {kind.SUBJECT} has no {key}"
         rx = compile_regex(str(wanted))
         if rx is None:
             return MAYBE, f"{key} regex {wanted} cannot be checked here"
         hit = rx.search(have) is not None
         return (YES, f"{key} matches {wanted}") if hit else (NO, f"{key} {have} does not match {wanted}")
-    label = schema.MATCHER_KEYS.get(key, {"label": key})["label"]
+    label = known["label"]
     if key not in f:
         return MAYBE, f"{key} is not known to this app"
     if have is None:
-        when = "when the window opened" if key == "at-startup" else "from niri IPC"
+        when = f"when the {kind.SUBJECT} opened" if OPENED_AT_STARTUP in f and key == "at-startup" \
+            else "from niri IPC"
         return MAYBE, f"whether it {label} is not known {when}"
+    if known["kind"] == "enum":
+        hit = str(wanted) == str(have)
+        return (YES, f"{label} is {have}") if hit else (NO, f"{label} is {have}, not {wanted}")
     hit = bool(have) == bool(wanted)
     state = label if have else label.replace("is ", "is not ", 1) if label.startswith("is ") else "not " + label
     return (YES if hit else NO), state
 
 
-def check_directive(props: dict, f: dict) -> tuple[str, list[str]]:
+def check_directive(props: dict, f: dict, kind=WINDOW) -> tuple[str, list[str]]:
     """A match or exclude line: all its matchers must hold."""
-    results = [check_matcher(k, v, f) for k, v in props.items()]
+    results = [check_matcher(k, v, f, kind) for k, v in props.items()]
     return _and(r for r, _ in results), [why for _, why in results]
 
 
@@ -383,24 +420,24 @@ class Verdict:
     reason: str
 
 
-def check_rule(rule: dict, f: dict) -> Verdict:
+def check_rule(rule: dict, f: dict, kind=WINDOW) -> Verdict:
     if rule.get("disabled"):
         return Verdict(NO, "turned off")
     matches = [c["props"] for c in rule.get("children", []) if c["name"] == "match"]
     excludes = [c["props"] for c in rule.get("children", []) if c["name"] == "exclude"]
-    m_results = [check_directive(p, f) for p in matches]
-    e_results = [check_directive(p, f) for p in excludes]
+    m_results = [check_directive(p, f, kind) for p in matches]
+    e_results = [check_directive(p, f, kind) for p in excludes]
     m = _or(r for r, _ in m_results) if matches else YES
     e = _or(r for r, _ in e_results) if excludes else NO
     if m == NO:
         first = next(w for r, w in m_results if r == NO)
-        failed = [x for x in first if " not " in x or "does not" in x or "has no" in x] or first
+        failed = [x for x in first if " not " in x or "does not" in x or "has no" in x or ", not " in x] or first
         return Verdict(NO, failed[0] if len(matches) == 1 else "matches none of its match lines")
     if e == YES:
         hit = next(w for r, w in e_results if r == YES)
         return Verdict(NO, "excluded: " + ", ".join(hit))
     if m == YES and e == NO:
-        why = next(w for r, w in m_results if r == YES) if matches else ["applies to every window"]
+        why = next(w for r, w in m_results if r == YES) if matches else [f"applies to every {kind.SUBJECT}"]
         return Verdict(YES, ", ".join(why))
     unknown = [x for r, w in m_results + e_results if r == MAYBE for x in w if "not known" in x or "cannot" in x]
     return Verdict(MAYBE, unknown[0] if unknown else "depends on state this app cannot see")
@@ -416,37 +453,37 @@ def tail(child: dict) -> str:
     return text[1:].strip()
 
 
-def leaves(children: list[dict], prefix: str = "") -> list[tuple[str, dict]]:
+def leaves(children: list[dict], prefix: str = "", kind=WINDOW) -> list[tuple[str, dict]]:
     """(path, node) for each property a rule sets, blocks merged as niri does."""
     out = []
     for c in children:
         if not prefix and c["name"] in ("match", "exclude"):
             continue
         path = prefix + c["name"]
-        if path in schema.MERGED_BLOCKS and "children" in c:
+        if path in kind.MERGED_BLOCKS and "children" in c:
             flags = [k["name"] for k in c["children"] if k["name"] in ("on", "off") and not k.get("args")]
             if flags:
                 state = "on" if "on" in flags else "off"
                 out.append((path + "/state", {"name": "state", "args": [state], "props": {}}))
             rest = [k for k in c["children"] if not (k["name"] in ("on", "off") and not k.get("args"))]
-            out += leaves(rest, path + "/")
+            out += leaves(rest, path + "/", kind)
             continue
         out.append((path, c))
     return out
 
 
-def label_of(path: str) -> str:
-    known = schema.PROP_PATHS.get(path)
+def label_of(path: str, kind=WINDOW) -> str:
+    known = kind.PROP_PATHS.get(path)
     return known["label"] if known else path.replace("/", " › ")
 
 
-def when_of(path: str) -> str:
-    known = schema.PROP_PATHS.get(path)
+def when_of(path: str, kind=WINDOW) -> str:
+    known = kind.PROP_PATHS.get(path)
     return known["when"] if known else "always"
 
 
 def merged(rules: list[dict], verdicts: list[Verdict],
-           open_verdicts: list[Verdict] | None = None) -> list[dict]:
+           open_verdicts: list[Verdict] | None = None, kind=WINDOW) -> list[dict]:
     """The values a window ends up with: {path, value, rule, earlier, maybe}.
 
     Properties niri applies when the window opens are judged by
@@ -455,8 +492,8 @@ def merged(rules: list[dict], verdicts: list[Verdict],
     out: dict[str, dict] = {}
     open_verdicts = open_verdicts or verdicts
     for i, (rule, now, then) in enumerate(zip(rules, verdicts, open_verdicts)):
-        for path, node in leaves(rule.get("children", [])):
-            v = then if when_of(path) == "open" else now
+        for path, node in leaves(rule.get("children", []), kind=kind):
+            v = then if when_of(path, kind) == "open" else now
             if v.status == NO:
                 continue
             value = node["args"][0] if path.endswith("/state") else tail(node)
@@ -467,25 +504,31 @@ def merged(rules: list[dict], verdicts: list[Verdict],
     return list(out.values())
 
 
-def summary(rule: dict) -> str:
+def summary(rule: dict, kind=WINDOW) -> str:
     """One line for the rule list: what it matches, then what it does."""
     parts = []
+    regex = _regex_keys(kind)
     matches = [c["props"] for c in rule.get("children", []) if c["name"] == "match"]
     if not matches:
-        parts.append("all windows")
+        parts.append("all " + kind.SUBJECTS)
     else:
         bits = []
         for props in matches[:2]:
-            words = [readable(str(v)) for k, v in props.items() if k in ("app-id", "title")]
-            words += [(k.replace("is-", "") if v else "not " + k.replace("is-", "")) for k, v in props.items()
-                      if k not in ("app-id", "title")]
-            bits.append(" ".join(words) or "all windows")
+            words = [readable(str(v)) for k, v in props.items() if k in regex]
+            for k, v in props.items():
+                if k in regex:
+                    continue
+                if not isinstance(v, bool):
+                    words.append(f"{v} {k}")
+                else:
+                    words.append(k.replace("is-", "") if v else "not " + k.replace("is-", ""))
+            bits.append(" ".join(words) or "all " + kind.SUBJECTS)
         parts.append(", ".join(bits) + (f" +{len(matches) - 2}" if len(matches) > 2 else ""))
-    for path, node in leaves(rule.get("children", []))[:2]:
+    for path, node in leaves(rule.get("children", []), kind=kind)[:2]:
         if path.endswith("/state"):
-            parts.append(f"{label_of(path).lower()} {node['args'][0]}")
+            parts.append(f"{label_of(path, kind).lower()} {node['args'][0]}")
             continue
-        known = schema.PROP_PATHS.get(path)
+        known = kind.PROP_PATHS.get(path)
         args = node.get("args", [])
         if known and known["kind"] == "bool" and args:
             parts.append(known["label"].lower() if args[0] else "not " + known["label"].lower())
@@ -494,15 +537,15 @@ def summary(rule: dict) -> str:
     return " · ".join(parts)
 
 
-def title(rule: dict) -> str:
+def title(rule: dict, kind=WINDOW) -> str:
     if rule.get("comment"):
         return rule["comment"]
     matches = [c["props"] for c in rule.get("children", []) if c["name"] == "match"]
     for props in matches:
-        for key in ("app-id", "title"):
+        for key in [m["key"] for m in kind.MATCHERS if m["kind"] == "regex"]:
             if key in props:
                 return readable(str(props[key]))
-    return "All windows" if not matches else "Rule"
+    return "All " + kind.SUBJECTS if not matches else "Rule"
 
 
 # --------------------------------------------------------------------------
@@ -587,17 +630,21 @@ def _directive_node(rule: dict, kind: str, index: int) -> dict | None:
     return found[index] if 0 <= index < len(found) else None
 
 
-def from_template(template: dict, app_id: str | None) -> dict:
+def from_template(template: dict, app_id: str | None, kind=WINDOW) -> dict:
+    """A new rule from a template; `app_id` is the selected window's app-id
+    (or surface's namespace) and fills the templates that need one."""
+    regex = _regex_keys(kind)
     rule = {"args": [], "props": {}, "children": copy.deepcopy(template["children"]),
             "comment": template["title"] if template["id"] != "blank" else "New rule"}
     for c in rule["children"]:
         for k, v in list(c["props"].items()):
-            if v == schema.APP:
-                c["props"][k] = niri_core.Raw(exact(app_id or "app-id"))
-            elif k in ("app-id", "title"):
+            if v == WINDOW.APP:
+                c["props"][k] = niri_core.Raw(exact(app_id or k))
+            elif k in regex:
                 c["props"][k] = niri_core.Raw(v)
     if template.get("needs_app") and app_id:
-        rule["comment"] = f"{template['title'].replace('this app', app_id).replace('App', app_id)}"
+        rule["comment"] = template["title"].replace("this app", app_id).replace("this surface", app_id) \
+            .replace("App", app_id).replace("Surface", app_id)
     return rule
 
 
@@ -606,18 +653,20 @@ def from_template(template: dict, app_id: str | None) -> dict:
 
 
 class RulesModel:
-    def __init__(self, config_fn):
+    def __init__(self, config_fn, kind=WINDOW):
         self._config = config_fn
+        self.kind = kind
+        self.name = kind.NAME
 
     @property
     def config(self):
         return self._config()
 
     def rules(self) -> list[dict]:
-        return self.config.rules(NAME)
+        return self.config.rules(self.name)
 
     def sources(self) -> list[dict]:
-        return self.config.tree.top_nodes(NAME)
+        return self.config.tree.top_nodes(self.name)
 
     def where(self, index: int) -> str:
         src = self.sources()[index]
@@ -628,7 +677,7 @@ class RulesModel:
         rule = copy.deepcopy(rules[index])
         fn(rule)
         rules[index] = rule
-        self.config.set_rules(NAME, rules)
+        self.config.set_rules(self.name, rules)
 
     # -- whole rules
 
@@ -636,13 +685,13 @@ class RulesModel:
         rules = self.rules()
         at = len(rules) if at is None else at
         rules.insert(at, rule)
-        self.config.set_rules(NAME, rules)
+        self.config.set_rules(self.name, rules)
         return at
 
     def remove(self, index: int):
         rules = self.rules()
         del rules[index]
-        self.config.set_rules(NAME, rules)
+        self.config.set_rules(self.name, rules)
 
     def move(self, index: int, delta: int) -> int:
         rules = self.rules()
@@ -650,7 +699,7 @@ class RulesModel:
         if to == index:
             return index
         rules.insert(to, rules.pop(index))
-        self.config.set_rules(NAME, rules)
+        self.config.set_rules(self.name, rules)
         return to
 
     def set_enabled(self, index: int, on: bool):
@@ -691,7 +740,7 @@ class RulesModel:
             if value is None:
                 props.pop(key, None)
             else:
-                props[key] = niri_core.Raw(value) if key in ("app-id", "title") else value
+                props[key] = niri_core.Raw(value) if key in _regex_keys(self.kind) else value
             node["props"] = props
         self._change(index, fn)
 
@@ -703,4 +752,4 @@ class RulesModel:
     # -- matching
 
     def verdicts(self, f: dict) -> list[Verdict]:
-        return [check_rule(r, f) for r in self.rules()]
+        return [check_rule(r, f, self.kind) for r in self.rules()]
