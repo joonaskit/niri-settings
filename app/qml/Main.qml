@@ -168,12 +168,14 @@ ApplicationWindow {
                 sourceComponent: window.currentPage === "layout" ? layoutPage
                                : window.currentPage === "files" ? filesPage
                                : window.currentPage === "displays" ? displaysPage
-                               : window.currentPage === "binds" ? bindsPage : placeholder
+                               : window.currentPage === "binds" ? bindsPage
+                               : window.currentPage === "window-rules" ? rulesPage : placeholder
             }
             Component { id: layoutPage; LayoutPage { filter: search.text } }
             Component { id: filesPage; ConfigFilesPage {} }
             Component { id: displaysPage; DisplaysPage {} }
             Component { id: bindsPage; KeyBindingsPage {} }
+            Component { id: rulesPage; WindowRulesPage {} }
             Component { id: placeholder; PlaceholderPage { title: window.currentTitle } }
         }
 

@@ -44,6 +44,28 @@ map (media keys, wheel, mouse, or a key your layout does not have) are listed un
   before the app sees them, and this Qt build has no shortcuts-inhibit support, so a
   combination niri already uses must be picked on the map instead.
 
+## Window rules
+
+The page lists every `window-rule` in the order niri reads them, across include files. A
+rule's name is the first line of the `//` comment right above it.
+
+- Rules are edited as a whole list. Each change splices only the lines that changed, so
+  comments, raw-string regexes (`r#"…"#`) and one-line rules stay as written. A moved
+  rule is written back exactly as it was.
+- Rule changes apply on save. They are never sent through the live-preview file, because
+  an overlay can add a rule but cannot change or remove one.
+- In managed mode, new rules go to `niri-gui.kdl` after your own. Changing, removing or
+  inserting between your own rules needs in-place mode.
+- The open windows come from niri IPC. Matching follows niri: any `match` line and no
+  `exclude` line, with every matcher of a line holding. The app-id and title regexes are
+  translated from Rust syntax and searched anywhere in the string.
+- A matcher that IPC cannot answer (`at-startup`, `is-active-in-column` in a column with
+  several windows) or a regex Python cannot reproduce (`\pL`, `(?i)` mid-pattern) gives
+  "?" instead of a guess.
+- Select a window to see which rules apply to it and the merged values. Later rules win,
+  and the `focus-ring`, `border`, `shadow`, `tab-indicator`, `background-effect` and
+  `popups` blocks merge child by child. "Pick a window…" uses `niri msg pick-window`.
+
 ## Layout
 
 ```
@@ -58,7 +80,10 @@ app/
   keymap.py      xkb keymap (libxkbcommon via ctypes) and the physical key layout
   binds.py       key bindings: conflicts, edits, the lockout check (no Qt)
   binds_view.py  the Key bindings page's object in QML
-  schema/        settings definitions that drive the forms; the action catalogue
+  rules.py       window rules: matching, merging, edits (no Qt)
+  rules_view.py  the Window rules page's object in QML
+  schema/        settings definitions that drive the forms; the action catalogue;
+                 window-rule matchers, properties and templates
   qml/           Theme.qml (style tokens), shared controls, pages
 tests/
   corpus/        config trees used by the round-trip tests
