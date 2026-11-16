@@ -44,6 +44,8 @@ class RulesView(QObject):
         self._picking = False
         self._error = ""           # why the last edit was refused
         self._casts = (0.0, None)  # (when, window ids being cast)
+        self._niri_start = None    # Unix time; 0.0 when it cannot be found
+        self._pid_start = {}       # client pid -> Unix time its process started
         self._cache = {}
         backend.changed.connect(self._refresh)
         backend.stateChanged.connect(self._refresh)
@@ -88,10 +90,34 @@ class RulesView(QObject):
             self._casts = (time.monotonic(), targets)
         return targets
 
+    def _clock(self, windows: dict) -> dict | None:
+        """Times for the at-startup matcher (see rules.startup)."""
+        if not self.backend.connected:
+            return None
+        if self._niri_start is None:
+            self._niri_start = ipc.niri_started() or 0.0
+        if not self._niri_start:
+            return None
+        stream = getattr(self.backend, "_stream", None)
+        opened = getattr(self.backend.state, "opened", {})
+        if stream is not None:
+            with stream.lock:
+                opened = dict(opened)
+        client = {}
+        for wid, w in windows.items():
+            pid = w.get("pid")
+            if pid and wid not in opened:
+                if pid not in self._pid_start:
+                    self._pid_start[pid] = ipc.process_started(pid)
+                client[wid] = self._pid_start[pid]
+        return {"niri_start": self._niri_start, "now": time.time(), "opened": dict(opened),
+                "client_start": {k: v for k, v in client.items() if v is not None}}
+
     def _facts(self) -> dict:
         def build():
             windows, workspaces = self._windows()
-            return rl.window_facts(windows, workspaces, self._cast_targets() if windows else set())
+            return rl.window_facts(windows, workspaces, self._cast_targets() if windows else set(),
+                                   self._clock(windows))
         return self._cached("facts", build)
 
     def _verdicts(self, wid) -> list:

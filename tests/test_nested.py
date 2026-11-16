@@ -111,6 +111,38 @@ window-rule {
     match app-id=r"^st\.urg$" is-urgent=false
     open-on-workspace "two"
 }
+
+// The test opens every window in niri's first minute.
+window-rule {
+    match app-id=r"^boot\.yes$" at-startup=true
+    open-floating true
+}
+window-rule {
+    match app-id=r"^boot\.no$" at-startup=false
+    open-floating true
+}
+
+// Rust regex syntax Python's re lacks (needs the regex package).
+window-rule {
+    match app-id=r"^rx\.greek$" title=r"^\p{Greek}+$"
+    open-floating true
+}
+window-rule {
+    match app-id=r"^rx\.[a-z&&[^aeiou]]+$"
+    open-on-workspace "two"
+}
+window-rule {
+    match app-id=r"^rx\.flag$" title=r"^a(?i)b(?-i)c$"
+    open-maximized true
+}
+window-rule {
+    match app-id=r"^rx\.fold$" title=r"(?i)^ß$"
+    open-floating true
+}
+window-rule {
+    match app-id=r"^rx\.bars$" title=r"^[a||b]$"
+    open-floating true
+}
 """ % GAPS
 
 # (app-id, title) of each test window.
@@ -139,6 +171,18 @@ WINDOWS = [
     ("st.act", "plain"),
     ("st.col", "plain"),
     ("st.urg", "plain"),
+    ("boot.yes", "plain"),
+    ("boot.no", "plain"),
+    ("rx.greek", "αβγ"),
+    ("rx.greek", "abc"),
+    ("rx.bcd", "plain"),
+    ("rx.bad", "plain"),
+    ("rx.flag", "aBc"),
+    ("rx.flag", "aBC"),
+    ("rx.flag", "ABc"),
+    ("rx.fold", "SS"),
+    ("rx.fold", "ẞ"),
+    ("rx.bars", "|"),
 ]
 
 ENABLED = os.environ.get("NIRI_SETTINGS_NESTED") == "1"
@@ -230,7 +274,9 @@ class NestedNiri:
         for app_id, title in specs:
             ipc.request({"Action": {"FocusWorkspace": {"reference": {"Name": home}}}})
             before = len(self.windows())
-            self.spawn("foot", f"--app-id={app_id}", f"--title={title}", "--", "sleep", "600")
+            # Whole-cell rounding would keep a maximized foot a few pixels short.
+            self.spawn("foot", "-o", "resize-by-cells=no", f"--app-id={app_id}", f"--title={title}",
+                       "--", "sleep", "600")
             self._wait(lambda: len(self.windows()) > before, f"window {app_id}")
         # Let every window settle into its final size.
         time.sleep(1)
@@ -251,7 +297,10 @@ class AgainstRealNiri(unittest.TestCase):
             niri.open_windows(WINDOWS, start)
             windows = {w["id"]: w for w in niri.windows()}
             workspaces = {w["id"]: w for w in niri.workspaces()}
-            facts = rl.window_facts(windows, workspaces, set())
+            clock = {"niri_start": ipc.niri_started(), "now": time.time(), "opened": {},
+                     "client_start": {wid: ipc.process_started(w["pid"]) for wid, w in windows.items()}}
+            self.assertIsNotNone(clock["niri_start"], "niri's start time from its socket name")
+            facts = rl.window_facts(windows, workspaces, set(), clock)
 
             problems = []
             for wid, w in sorted(windows.items()):

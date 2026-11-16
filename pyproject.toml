@@ -11,8 +11,9 @@ license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "niri_settings/fonts/OFL.txt"]
 requires-python = ">=3.11"
 # PySide6 comes from the distribution (Fedora: python3-pyside6), so it is not
-# pinned here; `pip install .[pip]` pulls it from PyPI instead.
-dependencies = []
+# pinned here; `pip install .[pip]` pulls it from PyPI instead. `regex` lets
+# window rules check Rust regex syntax Python's re lacks (Fedora: python3-regex).
+dependencies = ["regex"]
 classifiers = [
     "Environment :: X11 Applications :: Qt",
     "Operating System :: POSIX :: Linux",

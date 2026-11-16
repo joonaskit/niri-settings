@@ -250,13 +250,41 @@ class Regex(unittest.TestCase):
             self.assertIsNotNone(rx, pattern)
             self.assertEqual(rx.search(text) is not None, hit, (pattern, text))
 
+    def without_regex_package(self):
+        saved = rl._regex
+        rl._regex = None
+        rl._cache.clear()
+        self.addCleanup(rl._cache.clear)
+        self.addCleanup(setattr, rl, "_regex", saved)
+
     def test_unsupported_is_unknown_not_a_guess(self):
+        self.without_regex_package()
         for pattern in (r"\pL+", r"\p{Greek}", "a(?i)b", "[a-z&&[^x]]", "(?U)a+"):
             self.assertIsNone(rl.compile_regex(pattern), pattern)
         f = {"app-id": "x", "title": "y"}
         self.assertEqual(rl.check_matcher("app-id", r"\pL", f)[0], rl.MAYBE)
         self.assertEqual(rl.regex_error(r"\pL"), "")
         self.assertIn("Not a valid regex", rl.regex_error("(unclosed"))
+
+    @unittest.skipIf(rl._regex is None, "needs the regex package")
+    def test_rust_only_syntax_with_the_regex_package(self):
+        # Rust's answers; tests/test_nested.py checks the same kinds of pattern against niri.
+        cases = [
+            (r"\p{Greek}", "αβ", True), (r"^\pL+$", "héllo", True), (r"\PL", "abc", False),
+            (r"^[a-z&&[^aeiou]]+$", "bcd", True), (r"^[a-z&&[^aeiou]]+$", "bad", False),
+            (r"[a-z--[aeiou]]", "e", False), (r"^[a-c~~b-d]$", "d", True), (r"^[a-c~~b-d]$", "b", False),
+            (r"^a(?i)b$", "aB", True), (r"^a(?i)b$", "AB", False),
+            (r"^a(?i)b(?-i)c$", "aBc", True), (r"^a(?i)b(?-i)c$", "aBC", False),
+            (r"(?i)ß", "SS", False), (r"(?i)^ß$", "ẞ", True),               # simple case folding
+            (r"^[[:^digit:]]+$", "abc", True), (r"^[[:^digit:]]+$", "a1", False),
+            (r"^[a||b]$", "|", True), (r"\p{Greek}$", "α\n", False),
+        ]
+        for pattern, text, hit in cases:
+            rx = rl.compile_regex(pattern)
+            self.assertIsNotNone(rx, pattern)
+            self.assertEqual(rx.search(text) is not None, hit, (pattern, text))
+        for pattern in ("(?U)a+", "a(?m)b$", "a(?-u)b"):           # still no faithful translation
+            self.assertIsNone(rl.compile_regex(pattern), pattern)
 
     def test_exact(self):
         for text in ("org.mozilla.firefox", "a+b (1) [x]", "c$^d|e"):
@@ -357,6 +385,33 @@ class Matching(unittest.TestCase):
         f = rl.at_open(self.facts[2])
         self.assertEqual((f["is-focused"], f["is-active"], f["is-active-in-column"]), (False, False, True))
         self.assertIsNone(f["at-startup"])
+
+    def test_at_startup(self):
+        start = 1000.0
+
+        def both(now, opened=None, client=None):
+            clock = {"niri_start": start, "now": start + now,
+                     "opened": {} if opened is None else {1: start + opened},
+                     "client_start": {} if client is None else {1: start + client}}
+            return rl.startup(1, clock)
+
+        self.assertEqual(both(10), (True, True))                  # niri's first minute: every window
+        self.assertEqual(both(300, opened=30), (False, True))     # seen opening
+        self.assertEqual(both(300, opened=200), (False, False))
+        self.assertEqual(both(300, client=200), (False, False))   # its process started too late
+        self.assertEqual(both(300, client=5), (False, None))      # could have opened any time after
+        self.assertEqual(both(300), (False, None))
+        self.assertEqual(both(60.2), (None, None))                # too close to call
+        self.assertEqual(rl.startup(1, None), (None, None))
+
+        clock = {"niri_start": start, "now": start + 300, "opened": {1: start + 5}, "client_start": {}}
+        f = rl.window_facts(WINDOWS, WORKSPACES, set(), clock)
+        self.assertFalse(f[1]["at-startup"])
+        self.assertTrue(rl.at_open(f[1])["at-startup"])
+        self.assertIsNone(rl.at_open(f[2])["at-startup"])
+        r = rule(match(at_startup=True), prop("open-on-output", "DP-1"), prop("opacity", 0.5))
+        values = {m["path"] for m in rl.merged([r], [rl.check_rule(r, f[1])], [rl.check_rule(r, rl.at_open(f[1]))])}
+        self.assertEqual(values, {"open-on-output"})
 
     def test_cast_targets(self):
         self.assertEqual(rl.cast_targets({"Casts": []}), set())

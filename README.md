@@ -8,7 +8,7 @@ KDL config in place, keeps comments and formatting, and never writes a file that
 
 **Fedora.** Build the RPM from this repository (see `packaging/README.md`), or install it
 from the COPR repository once one is published, then start **niri settings** from your app
-launcher. It needs `niri`, `python3-pyside6` and `libxkbcommon`, which the package pulls in.
+launcher. It needs `niri`, `python3-pyside6`, `python3-regex` and `libxkbcommon`, which the package pulls in.
 
 **From source**, with Python 3.11 or newer:
 
