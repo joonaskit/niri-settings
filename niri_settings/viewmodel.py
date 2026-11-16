@@ -776,7 +776,7 @@ class Backend(QObject):
         for i, entry in enumerate(self.config.rules(kind)):
             args = [str(a) for a in entry.get("args", [])]
             text = args[0] if kind == "spawn-sh-at-startup" and args else shlex.join(args)
-            out.append({"index": i, "text": text})
+            out.append({"index": i, "text": text, "disabled": bool(entry.get("disabled"))})
         return out
 
     @Slot(str, int, str, result=str)
@@ -798,11 +798,24 @@ class Backend(QObject):
             if entries[index].get("args") == args:
                 return ""
             entry["comment"] = entries[index].get("comment", "")
+            if entries[index].get("disabled"):
+                entry["disabled"] = True
             entries[index] = entry
         else:
             entries.append(entry)
         self._apply_edit(lambda: self.config.set_rules(kind, entries))
         return ""
+
+    @Slot(str, int, bool)
+    def setStartupEnabled(self, kind, index, on):
+        """Turn a startup command on, or off (commented out with /-)."""
+        entries = self.config.rules(kind)
+        if 0 <= index < len(entries) and bool(on) == bool(entries[index].get("disabled")):
+            if on:
+                entries[index].pop("disabled")
+            else:
+                entries[index]["disabled"] = True
+            self._apply_edit(lambda: self.config.set_rules(kind, entries))
 
     @Slot(str, int)
     def removeStartup(self, kind, index):

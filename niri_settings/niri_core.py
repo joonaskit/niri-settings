@@ -75,6 +75,12 @@ class Node:
     children: list["Node"] | None = None
     block_start: int = -1             # offset of "{"
     block_end: int = -1               # offset of "}"
+    slashdash: int = -1               # offset of "/-" for a top-level node commented out
+
+    @property
+    def head(self) -> int:
+        """Where the node's text starts, counting a "/-" in front of it."""
+        return self.slashdash if self.slashdash >= 0 else self.start
 
     @property
     def args(self) -> list:
@@ -94,6 +100,7 @@ class _Parser:
         self.t = text
         self.n = len(text)
         self.file = file
+        self.disabled: list[Node] = []  # top-level nodes commented out with /-
 
     def fail(self, pos: int, message: str):
         raise KdlError(self.file, self.t.count("\n", 0, pos) + 1, message)
@@ -174,7 +181,11 @@ class _Parser:
                     self.fail(pos, "unexpected }")
                 return out, pos
             if self.t.startswith("/-", pos):
-                _, pos = self.node(self.skip_node_space(pos + 2))
+                node, end = self.node(self.skip_node_space(pos + 2))
+                if not in_block:
+                    node.slashdash = pos
+                    self.disabled.append(node)
+                pos = end
                 continue
             node, pos = self.node(pos)
             out.append(node)
@@ -307,6 +318,12 @@ class _Parser:
             return Entry(name, value, start, end), end
         value, end = self.value(pos)
         return Entry(None, value, start, end), end
+
+
+def _parse(text: str, file: str) -> tuple[list["Node"], list["Node"]]:
+    """The nodes of a document, and its top-level nodes commented out with /-."""
+    p = _Parser(text, file)
+    return p.parse(), p.disabled
 
 
 def _parse_number(word: str) -> int | float | None:
@@ -539,6 +556,7 @@ class _File:
     original: str
     nodes: list[Node]
     exists: bool
+    disabled: list[Node] = field(default_factory=list)  # top-level /- nodes
 
 
 class Tree:
@@ -567,7 +585,8 @@ class Tree:
                     raise KdlError(origin[0], origin[1], f"included file not found: {path}")
                 raise KdlError(path, 0, "file not found")
             text, exists = "", False
-        return _File(path, text, text, _Parser(text, path).parse(), exists)
+        nodes, disabled = _parse(text, path)
+        return _File(path, text, text, nodes, exists, disabled)
 
     def _load(self, path: str, optional=False, origin=None, depth=0):
         if path in self._files:
@@ -637,19 +656,23 @@ class Tree:
             level = siblings = hit.children or []
         return "/".join(parts) or None
 
-    def _top(self, f: _File | None = None, seen: set | None = None):
-        """Top-level nodes in the order niri applies them."""
+    def _top(self, f: _File | None = None, seen: set | None = None, disabled: bool = False):
+        """Top-level nodes in the order niri applies them.
+
+        With `disabled`, nodes commented out with /- are listed too, in place.
+        """
         f = f or self._files[self.main]
         seen = seen if seen is not None else set()
         if f.path in seen:
             return
         seen.add(f.path)
-        for node in f.nodes:
+        nodes = sorted(f.nodes + f.disabled, key=lambda n: n.start) if disabled and f.disabled else f.nodes
+        for node in nodes:
             yield f, node
-            if node.name == "include":
+            if node.name == "include" and node.slashdash < 0:
                 target = self._include_target(f, node)
                 if target in self._files:
-                    yield from self._top(self._files[target], seen)
+                    yield from self._top(self._files[target], seen, disabled)
 
     def _resolve(self, path: str, only: _File | None = None) -> list[tuple[_File, Node]]:
         segs = _segments(path)
@@ -738,8 +761,8 @@ class Tree:
 
     def _splice(self, f: _File, start: int, end: int, new: str):
         text = f.text[:start] + new + f.text[end:]
-        nodes = _Parser(text, f.path).parse()  # raises before anything changes
-        f.text, f.nodes = text, nodes
+        nodes, disabled = _parse(text, f.path)  # raises before anything changes
+        f.text, f.nodes, f.disabled = text, nodes, disabled
 
     def _find_in_file(self, f: _File, path: str) -> Node | None:
         found = self._resolve(path, only=f)
@@ -911,14 +934,15 @@ class Tree:
     # -- top-level nodes read and written whole (window-rule, layer-rule)
 
     def _tops(self, name: str) -> list[tuple[_File, Node]]:
-        return [(f, n) for f, n in self._top() if n.name == name]
+        """Every top-level node of this name, those commented out with /- included."""
+        return [(f, n) for f, n in self._top(disabled=True) if n.name == name]
 
     @staticmethod
     def _comment_lines(f: _File, node: Node) -> list[tuple[int, int]]:
         """(start, end) of the `//` lines directly above a node, top to bottom."""
         t = f.text
-        line_start = t.rfind("\n", 0, node.start) + 1
-        if t[line_start:node.start].strip():
+        line_start = t.rfind("\n", 0, node.head) + 1
+        if t[line_start:node.head].strip():
             return []
         out, end = [], line_start
         while end > 0:
@@ -940,22 +964,33 @@ class Tree:
         """Every top-level node of this name, from every file, in niri's order.
 
         `comment` is the first line of the `//` comment right above the node,
-        which serves as the node's name in the app.
+        which serves as the node's name in the app. `disabled` is true for a
+        node commented out with /-, which niri ignores; `text` then starts
+        with the /-.
         """
         out = []
         for f, node in self._tops(name):
             lines = self._comment_lines(f, node)
-            out.append({"file": f.path, "line": f.text.count("\n", 0, node.start) + 1,
+            out.append({"file": f.path, "line": f.text.count("\n", 0, node.head) + 1,
                         "end_line": f.text.count("\n", 0, max(node.start, node.end - 1)) + 1,
                         "value": _top_value(node), "comment": self._comment_of(f, node),
-                        "text": f.text[node.start:node.end],
-                        "full_text": f.text[lines[0][0] if lines else node.start:node.end]})
+                        "disabled": node.slashdash >= 0,
+                        "text": f.text[node.head:node.end],
+                        "full_text": f.text[lines[0][0] if lines else node.head:node.end]})
         return out
 
-    def replace_top(self, name: str, index: int, value: dict, comment: str | None = None):
-        """Change the index-th node of this name, and its name comment."""
+    def replace_top(self, name: str, index: int, value: dict, comment: str | None = None,
+                    disabled: bool | None = None):
+        """Change the index-th node of this name, its name comment, and
+        whether it is commented out with /-."""
         f, node = self._tops(name)[index]
         self._replace_node(f, node, value)
+        f, node = self._tops(name)[index]
+        if disabled is not None and disabled != (node.slashdash >= 0):
+            if disabled:
+                self._splice(f, node.start, node.start, "/-")
+            else:
+                self._splice(f, node.slashdash, node.start, "")
         if comment is None:
             return
         comment = " ".join(comment.split())
@@ -975,7 +1010,8 @@ class Tree:
             self._splice(f, at, at, f"{self._indent_of(f.text, node.start)}// {comment}\n")
 
     def insert_top(self, name: str, value: dict, file: str, anchor: int | None = None,
-                   after: bool = True, comment: str = "", text: str | None = None):
+                   after: bool = True, comment: str = "", text: str | None = None,
+                   disabled: bool = False):
         """Add a node of this name to one file, next to the anchor-th one.
 
         Without an anchor it goes at the end of the file, above any includes
@@ -985,7 +1021,7 @@ class Tree:
         f = self._file(file)
         comment = " ".join(comment.split())
         if text is None:
-            text = (f"// {comment}\n" if comment else "") + format_block(name, value)
+            text = (f"// {comment}\n" if comment else "") + ("/-" if disabled else "") + format_block(name, value)
         if anchor is not None:
             af, node = self._tops(name)[anchor]
             if af is not f:
@@ -998,7 +1034,7 @@ class Tree:
                     self._splice(f, at, at, "\n\n" + text)
             else:
                 lines = self._comment_lines(f, node)
-                at = lines[0][0] if lines else f.text.rfind("\n", 0, node.start) + 1
+                at = lines[0][0] if lines else f.text.rfind("\n", 0, node.head) + 1
                 self._splice(f, at, at, text + "\n\n")
             return
         t = f.text
@@ -1019,7 +1055,7 @@ class Tree:
         """Delete the index-th node of this name together with its name comment."""
         f, node = self._tops(name)[index]
         lines = self._comment_lines(f, node)
-        at = lines[0][0] if lines else f.text.rfind("\n", 0, node.start) + 1
+        at = lines[0][0] if lines else f.text.rfind("\n", 0, node.head) + 1
         self._remove_node(f, node)
         if lines:
             self._splice(f, lines[0][0], lines[-1][1], "")
@@ -1105,7 +1141,7 @@ class Tree:
 
     def _remove_node(self, f: _File, node: Node):
         t = f.text
-        start, end = node.start, node.end
+        start, end = node.head, node.end
         line_start = t.rfind("\n", 0, start) + 1
         i = end
         while i < len(t) and t[i] in _SPACES:
@@ -1143,8 +1179,8 @@ class Tree:
         """Replace a file's whole text (the source editor). Raises KdlError,
         changing nothing, if it does not parse. New includes are loaded."""
         f = self._file(file)
-        nodes = _Parser(text, f.path).parse()
-        f.text, f.nodes = text, nodes
+        nodes, disabled = _parse(text, f.path)
+        f.text, f.nodes, f.disabled = text, nodes, disabled
         for node in nodes:
             if node.name == "include":
                 target = self._include_target(f, node)
@@ -1181,5 +1217,6 @@ def load_tree(main_path: str, skip: tuple[str, ...] = (), missing_ok: bool = Fal
 def load_string(text: str, name: str = "<memory>") -> Tree:
     """A single in-memory document, for building or checking KDL text."""
     tree = Tree(name)
-    tree._files[name] = _File(name, text, text, _Parser(text, name).parse(), False)
+    nodes, disabled = _parse(text, name)
+    tree._files[name] = _File(name, text, text, nodes, False, disabled)
     return tree

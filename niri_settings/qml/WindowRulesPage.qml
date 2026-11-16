@@ -99,6 +99,7 @@ Item {
                                 implicitHeight: Math.max(44, ruleText.implicitHeight + 20)
                                 Accessible.role: Accessible.ListItem
                                 Accessible.name: modelData.title + ", " + modelData.subtitle
+                                                 + (modelData.disabled ? ", turned off" : "")
                                                  + (modelData.status === "yes" ? ", applies to the selected window"
                                                     : modelData.status === "maybe" ? ", may apply to the selected window" : "")
                                 Accessible.selected: current
@@ -115,7 +116,8 @@ Item {
                                             elide: Text.ElideRight
                                             font.pixelSize: Theme.body
                                             font.weight: Font.DemiBold
-                                            color: ruleRow.modelData.error ? Theme.warnText : Theme.text
+                                            color: ruleRow.modelData.error ? Theme.warnText
+                                                   : ruleRow.modelData.disabled ? Theme.muted : Theme.text
                                         }
                                         Text {
                                             Layout.fillWidth: true
@@ -124,6 +126,12 @@ Item {
                                             font.pixelSize: Theme.hint
                                             color: Theme.muted
                                         }
+                                    }
+                                    Text {
+                                        visible: ruleRow.modelData.disabled
+                                        text: "off"
+                                        font.pixelSize: Theme.hint
+                                        color: Theme.muted
                                     }
                                     Text {
                                         visible: ruleRow.modelData.status === "yes" || ruleRow.modelData.status === "maybe"
@@ -243,6 +251,14 @@ Item {
                                     border.color: nameField.activeFocus ? Theme.accent : Theme.line
                                 }
                             }
+                            Toggle {
+                                on: page.detail.disabled === false
+                                Accessible.name: on ? "Turn rule off" : "Turn rule on"
+                                ToolTip.visible: hovered; ToolTip.delay: 500
+                                ToolTip.text: on ? "Turn off: comments the rule out with /-, so niri skips it"
+                                                 : "Turn on: removes the /- in front of the rule"
+                                onClicked: rules.setEnabled(page.detail.index, !on)
+                            }
                             Btn {
                                 implicitWidth: 36; leftPadding: 0; rightPadding: 0
                                 text: "↑"
@@ -260,6 +276,12 @@ Item {
                                 onClicked: rules.moveRule(1)
                             }
                             Btn { text: "Remove"; onClicked: rules.removeRule() }
+                        }
+                        Banner {
+                            Layout.fillWidth: true
+                            visible: page.detail.disabled === true
+                            lead: "Turned off."
+                            text: "This rule is commented out with /-, so niri skips it. You can still edit it."
                         }
                         Hint {
                             visible: page.detail.has === true

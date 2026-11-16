@@ -137,8 +137,12 @@ class Config:
         return self.tree.get(path)
 
     def rules(self, name: str) -> list[dict]:
-        """Every rule of one kind, in niri's order: {args, props, children, comment}."""
-        return [dict(n["value"], comment=n["comment"]) for n in self.tree.top_nodes(name)]
+        """Every rule of one kind, in niri's order: {args, props, children, comment}.
+
+        Rules commented out with /- are listed too, with `disabled` set.
+        """
+        return [dict(n["value"], comment=n["comment"], **({"disabled": True} if n["disabled"] else {}))
+                for n in self.tree.top_nodes(name)]
 
     def source(self, path: str) -> dict | None:
         return self.tree.source_of(path)
@@ -368,8 +372,8 @@ class Config:
         plan.sort(key=lambda p: p[1] - (0.5 if p[0] == "insert" else 0), reverse=True)
         for op, i, value in plan:
             if op == "set":
-                body = {k: v for k, v in value.items() if k != "comment"}
-                self.tree.replace_top(name, i, body, value.get("comment", ""))
+                self.tree.replace_top(name, i, _body(value), value.get("comment", ""),
+                                      bool(value.get("disabled")))
             elif op == "remove":
                 self.tree.remove_top(name, i)
             else:
@@ -379,17 +383,17 @@ class Config:
     def _insert_rule(self, name: str, i: int, rule: dict):
         """Put a rule at position i of the current list."""
         nodes = self.tree.top_nodes(name)
-        body = {k: v for k, v in rule.items() if k != "comment"}
+        body, disabled = _body(rule), bool(rule.get("disabled"))
         comment = rule.get("comment", "")
         moved = getattr(self, "_moving", {}).get(json.dumps(rule, sort_keys=True, default=str))
         text = moved.pop(0) if moved else None
         if i and self._writable(nodes[i - 1]["file"]):
-            self.tree.insert_top(name, body, nodes[i - 1]["file"], i - 1, True, comment, text)
+            self.tree.insert_top(name, body, nodes[i - 1]["file"], i - 1, True, comment, text, disabled)
         elif i < len(nodes) and self._writable(nodes[i]["file"]):
-            self.tree.insert_top(name, body, nodes[i]["file"], i, False, comment, text)
+            self.tree.insert_top(name, body, nodes[i]["file"], i, False, comment, text, disabled)
         else:
             target = self.managed_file if self.write_mode == MANAGED else self.main
-            self.tree.insert_top(name, body, target, comment=comment, text=text)
+            self.tree.insert_top(name, body, target, comment=comment, text=text, disabled=disabled)
 
     def revert(self):
         self._baseline.clear()
@@ -912,6 +916,11 @@ class Config:
         if os.path.exists(self.preview_file) and os.path.getsize(self.preview_file):
             _write_atomic(self.preview_file, "")
         self._preview_written = ""
+
+
+def _body(rule: dict) -> dict:
+    """A rule as a node value, without the app's own keys."""
+    return {k: v for k, v in rule.items() if k not in ("comment", "disabled")}
 
 
 def _rule_ops(old: list[dict], new: list[dict]):
