@@ -7,10 +7,10 @@ import unittest
 
 from PySide6.QtCore import QCoreApplication
 
-from app import niri_core
-from app.config import FILE, MANAGED, Config, ReadOnlyError
-from app.schema import pages
-from app.viewmodel import SECTIONS, Backend
+from niri_settings import niri_core
+from niri_settings.config import FILE, MANAGED, Config, ReadOnlyError
+from niri_settings.schema import pages
+from niri_settings.viewmodel import SECTIONS, Backend
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT = os.path.join(HERE, "corpus", "default", "config.kdl")

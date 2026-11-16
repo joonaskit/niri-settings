@@ -1,7 +1,7 @@
 """NiriState folds event-stream events without a running niri."""
 import unittest
 
-from app.ipc import NiriState
+from niri_settings.ipc import NiriState
 
 
 def window(wid, col, row, focused=False, ws=1):

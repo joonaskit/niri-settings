@@ -332,7 +332,7 @@ class DisplayModel:
         if not apply:
             return False
         self._guard = subprocess.Popen(
-            [sys.executable, "-m", "app.output_guard", str(seconds), json.dumps(undo)],
+            [sys.executable, "-m", "niri_settings.output_guard", str(seconds), json.dumps(undo)],
             stdin=subprocess.PIPE, text=True, start_new_session=True,
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         for argv in apply:

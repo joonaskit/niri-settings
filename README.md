@@ -6,15 +6,44 @@ KDL config in place, keeps comments and formatting, and never writes a file that
 
 The plan, style rules and concept screens are in `desing/`.
 
-## Run
+## Install
 
-Needs Python 3 with PySide6 (Fedora: `python3-pyside6`) and `niri` on the PATH.
+**Fedora.** Build the RPM from this repository (see `packaging/README.md`), or install it
+from the COPR repository once one is published, then start **niri settings** from your app
+launcher. It needs `niri`, `python3-pyside6` and `libxkbcommon`, which the package pulls in.
+
+**From source**, with Python 3.11 or newer:
 
 ```
-python3 -m app                      # edits $NIRI_CONFIG or ~/.config/niri/config.kdl
-python3 -m app --config some.kdl    # edit another config tree
-python3 -m app --offline            # do not talk to niri over IPC
+pip install --user .          # uses the system PySide6
+pip install --user '.[pip]'   # or pulls PySide6 from PyPI
 ```
+
+To run from a checkout without installing:
+
+```
+python3 -m niri_settings                      # edits $NIRI_CONFIG or ~/.config/niri/config.kdl
+python3 -m niri_settings --config some.kdl    # edit another config tree
+python3 -m niri_settings --offline            # do not talk to niri over IPC
+python3 -m niri_settings --setup              # show the first-run choices again
+```
+
+## First run
+
+The first time the app opens a config, it asks two things. Nothing is written until you
+press Start.
+
+- **How changes are written.** "Edit my files" (in-place) changes the file that sets each
+  value. "Keep my files read-only" (managed) adds `include optional=true "niri-gui.kdl"` to
+  config.kdl and writes only there. Managed is suggested when config.kdl is a symlink, in
+  the Nix store or in a git repository.
+- **Live preview.** Adds `include optional=true "niri-gui-preview.kdl"` as the last line,
+  so unsaved changes show on the desktop.
+
+Each include line is its own validated save, with a snapshot first. If config.kdl does not
+exist yet, it is created from niri's default config (`/usr/share/doc/niri/default-config.kdl`)
+before anything else, also when you press Skip. Both choices can be changed later on the
+Config files page.
 
 ## Test
 
@@ -26,7 +55,7 @@ python3 -m unittest discover -s tests -t .
 
 Mode, scale, rotation, position and on/off are never applied by saving alone. "Try for
 15 s" sends them to niri with `niri msg output`, which does not touch the config, and
-`app/output_guard.py` (a separate process) reverts them unless you press Keep. Save is
+`niri_settings/output_guard.py` (a separate process) reverts them unless you press Keep. Save is
 refused while there are display changes that have not been tried and kept.
 
 ## Key bindings
@@ -46,7 +75,7 @@ map (media keys, wheel, mouse, or a key your layout does not have) are listed un
 
 ## Settings pages
 
-Most pages are drawn from `app/schema/pages.py`. Each setting has a kind (the control), a
+Most pages are drawn from `niri_settings/schema/pages.py`. Each setting has a kind (the control), a
 config path, a label and niri's default. Each card shows where its value is set. That
 `file:line` link opens the source editor at the line, and Reset removes the setting so
 niri's default applies. The search box in the top bar covers every setting on every page.
@@ -92,7 +121,7 @@ rule's name is the first line of the `//` comment right above it.
 ## Layout
 
 ```
-app/
+niri_settings/
   niri_core.py   load, merge and edit the KDL include tree (text splices, no re-serialising)
   config.py      pending changes, staged validation, snapshots, save, live-preview file
   ipc.py         niri socket requests and the event stream
@@ -107,10 +136,20 @@ app/
   rules_view.py  the Window rules page's object in QML
   schema/        settings definitions that drive the forms (pages.py, layout.py);
                  the action catalogue; window-rule matchers, properties and templates
-  qml/           Theme.qml (style tokens), shared controls, pages
+  qml/           Theme.qml (style tokens), shared controls, pages, the first-run dialog
+  fonts/         Inter and JetBrains Mono (OFL), so the app looks the same everywhere
+data/            desktop entry and AppStream metainfo
+icons/           app icon: full size, a simpler one for 16–32 px, and a symbolic one
+packaging/       the Fedora RPM spec and how to release (packaging/README.md)
+.copr/Makefile   builds a source RPM for COPR from a git checkout
 tests/
   corpus/        config trees used by the round-trip tests
 ```
+
+## License
+
+GPL-3.0-or-later (see `LICENSE`). The bundled fonts are under the SIL Open Font License
+1.1 (`niri_settings/fonts/OFL.txt`).
 
 ## Safety net
 

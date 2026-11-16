@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.joonaskit.NiriSettings</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>niri settings</name>
+  <summary>Change the niri compositor's settings without breaking its config</summary>
+  <description>
+    <p>
+      A settings app for the niri Wayland compositor. It edits your KDL config in place,
+      keeps your comments and formatting, and never writes a file that niri validate rejects.
+    </p>
+    <ul>
+      <li>Layout, appearance, animations, input devices, gestures and startup apps</li>
+      <li>Displays: arrange outputs and try a mode or scale for 15 seconds before keeping it</li>
+      <li>Key bindings on a keyboard map, with conflict detection</li>
+      <li>Window rules matched live against your open windows</li>
+      <li>A source editor, a diff of unsaved changes and snapshots of every save</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.joonaskit.NiriSettings.desktop</launchable>
+  <url type="homepage">https://github.com/joonaskit/niri-settings</url>
+  <url type="bugtracker">https://github.com/joonaskit/niri-settings/issues</url>
+  <developer id="io.github.joonaskit">
+    <name>Joonas Kitunen</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>niri-settings</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">640</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <categories>
+    <category>Settings</category>
+  </categories>
+  <releases>
+    <release version="0.1.0" date="2026-11-16">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

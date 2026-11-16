@@ -3,7 +3,7 @@
 Runs as its own process so the revert still happens if the settings app
 crashes or its window cannot be seen. Usage:
 
-    python3 -m app.output_guard SECONDS  (revert commands as JSON on argv[2])
+    python3 -m niri_settings.output_guard SECONDS  (revert commands as JSON on argv[2])
 
 It waits on stdin. "keep" ends it without doing anything. "revert", a closed
 stdin (the app died) or the timeout all run the revert commands.

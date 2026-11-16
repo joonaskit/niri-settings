@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=niri settings
+GenericName=Compositor Settings
+Comment=Change niri's layout, displays, key bindings and window rules
+Exec=niri-settings
+Icon=io.github.joonaskit.NiriSettings
+Terminal=false
+Categories=Settings;DesktopSettings;Qt;
+Keywords=niri;compositor;wayland;config;kdl;layout;keyboard;shortcuts;displays;monitor;window;rules;
+StartupNotify=true

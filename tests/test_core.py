@@ -6,8 +6,8 @@ import subprocess
 import tempfile
 import unittest
 
-from app import niri_core
-from app.config import Config
+from niri_settings import niri_core
+from niri_settings.config import Config
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = sorted(glob.glob(os.path.join(HERE, "corpus", "*", "config.kdl")))
