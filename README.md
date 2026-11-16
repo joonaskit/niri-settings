@@ -4,8 +4,6 @@ A settings app for the [niri](https://github.com/YaLTeR/niri) compositor. It edi
 KDL config in place, keeps comments and formatting, and never writes a file that
 `niri validate` rejects.
 
-The plan, style rules and concept screens are in `desing/`.
-
 ## Install
 
 **Fedora.** Build the RPM from this repository (see `packaging/README.md`), or install it
