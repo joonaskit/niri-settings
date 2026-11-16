@@ -106,8 +106,12 @@ rule's name is the first line of the `//` comment right above it.
   greyed out, in place. The switch next to the rule's name adds or removes the `/-`.
   niri skips such rules, so they never match a window, but they can still be edited.
   Startup commands get the same switch.
-- Rule changes apply on save. They are never sent through the live-preview file, because
-  an overlay can add a rule but cannot change or remove one.
+- With the live preview on, rule edits that only add are shown at once: the preview file
+  gets rules that, read after all the others, give the same result. That covers a new
+  rule, a rule turned on, and new or changed properties on a rule whose match lines stay
+  the same, as long as no later rule sets the same property. Removals, moves, match
+  edits and turning a rule off apply on save; the hint under the rule's name says which
+  case an edit is in. Open-time properties affect windows opened after the preview.
 - In managed mode, new rules go to `niri-gui.kdl` after your own. Changing, removing or
   inserting between your own rules needs in-place mode.
 - The open windows come from niri IPC. Matching follows niri: any `match` line and no

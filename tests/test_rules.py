@@ -188,12 +188,41 @@ class CoreEdits(Base):
         self.assertTrue(cfg.save()[0])
         self.assertEqual(Config(self.main).rules("window-rule")[i], cfg.rules("window-rule")[i])
 
-    def test_rules_are_not_live_previewed(self):
+    def test_edits_that_add_are_previewed_as_added_rules(self):
         cfg = self.load()
         self.model.set_prop(1, "opacity", prop("opacity", 0.5))
         cfg.set("layout/gaps", 3)
+        text = cfg.preview_text()
+        self.assertIn("gaps 3", text)
+        self.assertIn('window-rule {\n    match app-id="firefox$" title="^Picture-in-Picture$"\n'
+                      '    opacity 0.5\n}', text)
+        self.assertNotIn("open-floating", text)        # unchanged properties are not repeated
+
+    def test_edits_that_cannot_be_shown_wait_for_save(self):
+        cfg = self.load()
+        self.model.remove(0)
+        self.assertEqual(cfg.rule_preview("window-rule"), (None, "a rule was moved or removed"))
         self.assertNotIn("window-rule", cfg.preview_text())
-        self.assertIn("gaps 3", cfg.preview_text())
+
+    @unittest.skipUnless(HAVE_NIRI, "niri is not installed")
+    def test_niri_accepts_the_preview(self):
+        cfg = self.load()
+        self.assertTrue(cfg.enable_preview()[0])
+        self.model.set_prop(1, "shadow/state", {"args": ["on"], "props": {}})
+        self.model.add(rule(match(app_id="^foot$"), prop("opacity", 0.9)))
+        ok, message = cfg.write_preview()
+        self.assertTrue(ok, message)
+        self.assertEqual(read(cfg.preview_file).count("window-rule {"), 2)
+
+    def test_a_rule_after_the_preview_include_stops_the_preview(self):
+        cfg = self.load()
+        self.assertTrue(cfg.enable_preview()[0])
+        self.model.set_prop(1, "opacity", prop("opacity", 0.5))
+        self.assertIsNotNone(cfg.rule_preview("window-rule")[0])
+        cfg.set_text(self.main, cfg.tree.render(self.main) + 'window-rule {\n    match app-id="x"\n}\n')
+        extra, why = cfg.rule_preview("window-rule")
+        self.assertIsNone(extra)
+        self.assertIn("after the preview include", why)
 
 
 class SlashDash(Base):
@@ -509,6 +538,74 @@ class Props(unittest.TestCase):
         self.assertEqual(rl.title(rule(prop("opacity", 1))), "All windows")
 
 
+class Overlay(unittest.TestCase):
+    """Unsaved rule edits shown by adding rules after the saved ones."""
+
+    BASE = [rule(match(app_id="^a$"), prop("opacity", 0.9), comment="A"),
+            rule(match(app_id="^b$"), prop("open-floating", True)),
+            dict(rule(match(app_id="^c$"), prop("opacity", 0.5)), disabled=True)]
+
+    def edit(self, fn):
+        new = copy.deepcopy(self.BASE)
+        fn(new)
+        return rl.overlay(self.BASE, new)
+
+    def test_nothing_changed(self):
+        self.assertEqual(self.edit(lambda r: r[0].update(comment="renamed")), ([], ""))
+
+    def test_new_rule_at_the_end_or_in_the_middle(self):
+        added = rule(match(app_id="^d$"), prop("opacity", 0.7))
+        self.assertEqual(self.edit(lambda r: r.append(added)), ([rl._body(added)], ""))
+        extra, _ = self.edit(lambda r: r.insert(1, rule(prop("open-maximized", True))))
+        self.assertEqual(extra, [{"args": [], "props": {}, "children": [prop("open-maximized", True)]}])
+        # Rule A after it sets opacity too, so the new rule must not win there.
+        self.assertEqual(self.edit(lambda r: r.insert(0, rule(prop("opacity", 1)))),
+                         (None, "a later rule also sets opacity"))
+        # Rule C sets opacity as well, but it is off.
+        self.assertIsNotNone(self.edit(lambda r: r.insert(1, rule(prop("opacity", 1))))[0])
+
+    def test_added_or_changed_properties_carry_the_match_lines(self):
+        extra, _ = self.edit(lambda r: r[0]["children"].append(prop("clip-to-geometry", True)))
+        self.assertEqual(extra, [{"args": [], "props": {}, "children": [match(app_id="^a$"),
+                                                                       prop("clip-to-geometry", True)]}])
+        extra, _ = self.edit(lambda r: r[0]["children"].__setitem__(1, prop("opacity", 0.8)))
+        self.assertEqual(extra[0]["children"][1], prop("opacity", 0.8))
+
+    def test_merged_blocks_add_only_the_changed_child(self):
+        base = [rule(match(app_id="^a$"), {"name": "shadow", "args": [], "props": {},
+                                           "children": [prop("on"), prop("softness", 30)]})]
+        new = copy.deepcopy(base)
+        new[0]["children"][1]["children"].append(prop("spread", 4))
+        extra, _ = rl.overlay(base, new)
+        self.assertEqual(extra[0]["children"][1], {"name": "shadow", "args": [], "props": {},
+                                                    "children": [prop("spread", 4)]})
+
+    def test_a_later_rule_setting_the_same_property_blocks_it(self):
+        def fn(r):
+            r[0]["children"].append(prop("open-floating", False))
+        self.assertEqual(self.edit(fn), (None, "a later rule also sets open floating"))
+
+    def test_turning_on_adds_the_whole_rule_and_turning_off_cannot_be_shown(self):
+        extra, _ = self.edit(lambda r: r[2].pop("disabled"))
+        self.assertEqual(extra, [{"args": [], "props": {}, "children": [match(app_id="^c$"), prop("opacity", 0.5)]}])
+        self.assertEqual(self.edit(lambda r: r[1].update(disabled=True)), (None, "a rule was turned off"))
+        self.assertEqual(self.edit(lambda r: r[2]["children"].append(prop("opacity", 1))), ([], ""))
+
+    def test_what_only_save_can_show(self):
+        self.assertEqual(self.edit(lambda r: r.pop(0)), (None, "a rule was moved or removed"))
+        self.assertEqual(self.edit(lambda r: r.reverse()), (None, "rules were moved"))
+        self.assertEqual(self.edit(lambda r: r[0]["children"].__setitem__(0, match(app_id="^z$"))),
+                         (None, "a match or exclude line changed"))
+        self.assertEqual(self.edit(lambda r: r[1]["children"].pop()), (None, "Open floating was removed from a rule"))
+
+    def test_layer_rules(self):
+        base = [rule(match(namespace="^waybar$"), prop("opacity", 0.9))]
+        new = copy.deepcopy(base)
+        new[0]["children"].append(prop("place-within-backdrop", True))
+        extra, _ = rl.overlay(base, new, rl.LAYER)
+        self.assertEqual(extra[0]["children"][-1], prop("place-within-backdrop", True))
+
+
 class StubBackend(QObject):
     changed = Signal()
     stateChanged = Signal()
@@ -629,6 +726,18 @@ class View(Base):
         self.assertNotIn("exclude", self.text())
         v.fillFromTarget("title")
         self.assertIn('title="^GitHub — Mozilla Firefox$"', self.text())
+
+    def test_hint_says_when_edits_reach_niri(self):
+        v = self.view
+        v.select(1)
+        self.assertTrue(v.detail["saved"].startswith("applies when you save"))     # preview off
+        self.assertTrue(self.config.enable_preview()[0])
+        v._refresh()
+        self.assertIn("previewed live; others apply when you save", v.detail["saved"])
+        v.addProp("opacity")
+        self.assertTrue(v.detail["saved"].startswith("unsaved changes are previewed live; open-time"))
+        v.moveRule(-1)
+        self.assertEqual(v.detail["saved"], "unsaved changes show after Save: a rule was moved or removed")
 
     def test_remove_and_move_keep_a_selection(self):
         v = self.view

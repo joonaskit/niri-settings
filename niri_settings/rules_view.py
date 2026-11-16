@@ -318,9 +318,23 @@ class RuleListView(QObject):
                 "always": [it for it in items if it["when"] != "open"],
                 "addable": addable,
                 "kdl": text,
+                "saved": self._preview_hint(),
                 "error": self._error or self._rule_error(i),
             }
         return self._cached("detail", build)
+
+    def _preview_hint(self) -> str:
+        """When unsaved rule edits reach niri: now, through the preview, or on save."""
+        cfg = self.backend.config
+        if not getattr(cfg, "preview_enabled", False):
+            return self.WORDS["saved"]
+        extra, why = cfg.rule_preview(self.kind.NAME)
+        if extra is None:
+            return f"unsaved changes show after Save: {why}"
+        if not extra:
+            return "edits that add rules or properties are previewed live; others apply when you save"
+        return "unsaved changes are previewed live" + (
+            "; open-time settings affect windows opened from now on" if self.WORDS["hasOpen"] else "")
 
     @Property("QVariantList", constant=True)
     def matchers(self):

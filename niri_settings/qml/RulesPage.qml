@@ -299,7 +299,7 @@ Item {
                             visible: page.detail.has === true
                             Layout.topMargin: -12
                             config: page.detail.where || ""
-                            plain: page.words.saved
+                            plain: page.detail.saved || page.words.saved
                         }
 
                         Text {
