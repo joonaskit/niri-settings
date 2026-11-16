@@ -384,6 +384,8 @@ class Verdict:
 
 
 def check_rule(rule: dict, f: dict) -> Verdict:
+    if rule.get("disabled"):
+        return Verdict(NO, "turned off")
     matches = [c["props"] for c in rule.get("children", []) if c["name"] == "match"]
     excludes = [c["props"] for c in rule.get("children", []) if c["name"] == "exclude"]
     m_results = [check_directive(p, f) for p in matches]
@@ -650,6 +652,15 @@ class RulesModel:
         rules.insert(to, rules.pop(index))
         self.config.set_rules(NAME, rules)
         return to
+
+    def set_enabled(self, index: int, on: bool):
+        """Turn a rule on or off: off comments it out with /- in front."""
+        def fn(rule):
+            if on:
+                rule.pop("disabled", None)
+            else:
+                rule["disabled"] = True
+        self._change(index, fn)
 
     def rename(self, index: int, name: str):
         self._change(index, lambda r: r.__setitem__("comment", " ".join(name.split())))

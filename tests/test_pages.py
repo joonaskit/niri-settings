@@ -172,7 +172,7 @@ class Settings(Base):
 
     def test_lists(self):
         b = self.load()
-        self.assertEqual(b.startupList("spawn-at-startup"), [{"index": 0, "text": "waybar"}])
+        self.assertEqual(b.startupList("spawn-at-startup"), [{"index": 0, "text": "waybar", "disabled": False}])
         self.assertEqual(b.setStartup("spawn-at-startup", -1, "foot --server"), "")
         self.assertEqual(b.setStartup("spawn-sh-at-startup", -1, "swaybg -i ~/bg.png | logger"), "")
         self.assertEqual(b.setStartup("spawn-at-startup", 0, "waybar -c ~/w.json"), "")
@@ -185,6 +185,13 @@ class Settings(Base):
         self.assert_valid()
         b.removeStartup("spawn-at-startup", 1)
         self.assertNotIn("--server", self.text())
+        b.setStartupEnabled("spawn-at-startup", 0, False)
+        self.assertIn('\n/-spawn-at-startup "waybar" "-c" "~/w.json"\n', self.text())
+        self.assertEqual(b.setStartup("spawn-at-startup", 0, "waybar"), "")   # editing keeps it off
+        self.assertTrue(b.startupList("spawn-at-startup")[0]["disabled"])
+        self.assert_valid()
+        b.setStartupEnabled("spawn-at-startup", 0, True)
+        self.assertIn('\nspawn-at-startup "waybar"\n', self.text())
 
         self.assertEqual(b.addWorkspace("chat"), "")
         self.assertIn("already", b.addWorkspace("chat"))

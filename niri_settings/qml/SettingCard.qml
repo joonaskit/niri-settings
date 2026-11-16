@@ -623,12 +623,20 @@ Card {
                     required property var modelData
                     Layout.fillWidth: true
                     spacing: 8
+                    Toggle {
+                        on: !modelData.disabled
+                        Accessible.name: (on ? "Turn off " : "Turn on ") + modelData.text
+                        onClicked: backend.setStartupEnabled(card.path, modelData.index, !on)
+                    }
                     Field {
                         Layout.fillWidth: true
                         font.family: Theme.mono
                         font.pixelSize: Theme.config
+                        font.strikeout: modelData.disabled
+                        opacity: modelData.disabled ? 0.6 : 1
                         text: modelData.text
                         Accessible.name: card.setting.label + " " + (modelData.index + 1)
+                                         + (modelData.disabled ? ", turned off" : "")
                         onEditingFinished: if (text !== modelData.text) st.problem = backend.setStartup(card.path, modelData.index, text)
                     }
                     Btn {
@@ -641,6 +649,7 @@ Card {
             }
             RowLayout {
                 spacing: 8
+                Item { visible: st.items.length > 0; implicitWidth: 52 }   // under the on/off switches
                 Field {
                     id: newCmd
                     Layout.fillWidth: true

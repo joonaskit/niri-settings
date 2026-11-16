@@ -102,6 +102,10 @@ rule's name is the first line of the `//` comment right above it.
 - Rules are edited as a whole list. Each change splices only the lines that changed, so
   comments, raw-string regexes (`r#"…"#`) and one-line rules stay as written. A moved
   rule is written back exactly as it was.
+- Rules commented out with `/-` (like the examples in niri's default config) are listed
+  greyed out, in place. The switch next to the rule's name adds or removes the `/-`.
+  niri skips such rules, so they never match a window, but they can still be edited.
+  Startup commands get the same switch.
 - Rule changes apply on save. They are never sent through the live-preview file, because
   an overlay can add a rule but cannot change or remove one.
 - In managed mode, new rules go to `niri-gui.kdl` after your own. Changing, removing or

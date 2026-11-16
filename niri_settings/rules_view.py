@@ -169,6 +169,7 @@ class RulesView(QObject):
                 out.append({"index": i, "title": rl.title(rule), "subtitle": rl.summary(rule),
                             "where": f"{os.path.basename(sources[i]['file'])}:{sources[i]['line']}",
                             "status": verdicts[i].status if verdicts else "",
+                            "disabled": bool(rule.get("disabled")),
                             "error": self._rule_error(i) != ""})
             return out
         return self._cached("list", build)
@@ -213,6 +214,13 @@ class RulesView(QObject):
         if i >= 0 and self._edit(lambda: holder.setdefault("to", self.model.move(i, delta))):
             self._index = holder["to"]
             self._refresh()
+
+    @Slot(int, bool)
+    def setEnabled(self, index, on):
+        """Turn the rule at `index` on, or off (commented out with /-)."""
+        rules = self._rules()
+        if 0 <= index < len(rules) and bool(on) == bool(rules[index].get("disabled")):
+            self._edit(lambda: self.model.set_enabled(index, bool(on)))
 
     @Slot(str)
     def rename(self, name):
@@ -309,6 +317,7 @@ class RulesView(QObject):
             matches = [d for d in rl.directives(rule) if d[0] == "match"]
             return {
                 "has": True, "index": i, "title": rl.title(rule), "comment": rule.get("comment", ""),
+                "disabled": bool(rule.get("disabled")),
                 "where": f"{os.path.basename(src['file'])}:{src['line']}",
                 "first": i == 0, "last": i == len(self._rules()) - 1,
                 "directives": self._directive_items(rule, f),

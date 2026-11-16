@@ -78,8 +78,10 @@ class CoreEdits(Base):
     def test_read_with_names(self):
         cfg = self.load()
         rules = cfg.rules("window-rule")
-        self.assertEqual(len(rules), 2)   # the two /- examples are commented out
+        self.assertEqual(len(rules), 4)   # the last two are the /- examples, turned off
+        self.assertEqual([r.get("disabled", False) for r in rules], [False, False, True, True])
         self.assertEqual(rules[0]["comment"], "Work around WezTerm's initial configure bug")
+        self.assertEqual(rules[3]["comment"], "Example: enable rounded corners for all windows.")
         self.assertEqual(rules[1]["children"][0]["props"]["app-id"], "firefox$")
         self.assertEqual(rules[0]["children"][1], {"name": "default-column-width", "args": [], "props": {},
                                                    "children": []})
@@ -118,7 +120,7 @@ class CoreEdits(Base):
                                                prop("default-column-width") | {"children": [prop("fixed", 480)]},
                                                comment="Foo is see-through")]
         cfg.set_rules("window-rule", new)
-        self.assertIn("    open-floating true\n}\n\n// Foo is see-through\nwindow-rule {\n"
+        self.assertIn("    clip-to-geometry true\n}\n\n// Foo is see-through\nwindow-rule {\n"
                       '    match app-id=r#"^org\\.foo$"#\n'
                       "    opacity 0.8\n"
                       "    focus-ring {\n        off\n        width 2\n    }\n"
@@ -192,6 +194,72 @@ class CoreEdits(Base):
         cfg.set("layout/gaps", 3)
         self.assertNotIn("window-rule", cfg.preview_text())
         self.assertIn("gaps 3", cfg.preview_text())
+
+
+class SlashDash(Base):
+    """Rules commented out with /- are listed, turned off, and can be turned on."""
+
+    BLOCK_OUT = ("// Example: block out two password managers from screen capture.\n"
+                 "// (This example rule is commented out with a \"/-\" in front.)\n"
+                 "/-window-rule {\n")
+
+    def test_turn_on_and_off_again(self):
+        cfg = self.load()
+        before = self.text()
+        self.model.set_enabled(2, True)
+        text = self.text()
+        on = self.BLOCK_OUT.replace("/-window-rule", "window-rule")
+        self.assertIn(on, text)
+        self.assertNotIn("disabled", cfg.rules("window-rule")[2])
+        self.assertEqual(cfg.pending_count(), 1)
+        self.assertEqual(text.replace(on, self.BLOCK_OUT), before)
+        self.model.set_enabled(2, False)
+        self.assertEqual(self.text(), before)
+        self.assertEqual(cfg.pending, {})
+
+    def test_editing_a_rule_that_is_off_keeps_it_off(self):
+        cfg = self.load()
+        self.model.set_prop(3, "opacity", prop("opacity", 0.9))
+        self.model.rename(3, "Round corners")
+        self.assertIn("// Round corners\n// (This example rule is commented out with a \"/-\" in front.)\n"
+                      "/-window-rule {\n    geometry-corner-radius 12\n    clip-to-geometry true\n"
+                      "    opacity 0.9\n}\n", self.text())
+        self.assertTrue(cfg.rules("window-rule")[3]["disabled"])
+
+    def test_off_rules_move_add_and_remove(self):
+        cfg = self.load()
+        self.model.move(3, -3)
+        self.assertTrue(self.text().index("/-window-rule {\n    geometry") < self.text().index("WezTerm"))
+        self.assertEqual([r.get("disabled", False) for r in cfg.rules("window-rule")],
+                         [True, False, False, True])
+        self.model.remove(0)
+        self.assertNotIn("geometry-corner-radius 12", self.text())
+        self.model.add(rule(prop("opacity", 0.5), comment="Dim") | {"disabled": True})
+        self.assertIn("// Dim\n/-window-rule {\n    opacity 0.5\n}\n", self.text())
+        self.assertTrue(cfg.rules("window-rule")[-1]["disabled"])
+
+    def test_only_top_level_nodes_count(self):
+        doc = niri_core.load_string('/- include "gone.kdl"\nwindow-rule {\n    /-match app-id="x"\n'
+                                    '    opacity 0.5\n}\n/-  layer-rule { opacity 0.1; }\n')
+        rules = doc.top_nodes("window-rule")
+        self.assertEqual(rules[0]["value"]["children"], [prop("opacity", 0.5)])
+        self.assertFalse(rules[0]["disabled"])
+        layer = doc.top_nodes("layer-rule")
+        self.assertEqual((layer[0]["disabled"], layer[0]["text"]), (True, "/-  layer-rule { opacity 0.1; }"))
+        self.assertIsNone(doc.get("layer-rule"))      # the rest of the config still ignores it
+        self.assertEqual(doc.list(""), ["window-rule#0"])
+
+    def test_turned_off_rules_never_match(self):
+        r = rule(prop("opacity", 0.5)) | {"disabled": True}
+        self.assertEqual(rl.check_rule(r, {}).status, rl.NO)
+
+    @unittest.skipUnless(HAVE_NIRI, "niri is not installed")
+    def test_niri_accepts_toggled_rules(self):
+        cfg = self.load()
+        self.model.set_enabled(2, True)
+        self.model.set_enabled(1, False)
+        ok, message = cfg.validate()
+        self.assertTrue(ok, message)
 
 
 class Managed(Base):
@@ -485,7 +553,17 @@ class View(Base):
                          [("match", ["app-id", "title"])])
         self.assertEqual(d["open"][0]["path"], "open-floating")
         self.assertTrue(d["kdl"].startswith("// Open the Firefox"))
-        self.assertTrue(d["last"])
+        self.assertFalse(d["last"])
+        self.assertFalse(d["disabled"])
+        v.select(3)
+        self.assertTrue(v.detail["last"])
+        self.assertTrue(v.detail["disabled"])
+        self.assertTrue(v.detail["kdl"].startswith("// Example: enable rounded corners"))
+        self.assertIn("\n/-window-rule {", v.detail["kdl"])
+        self.assertEqual([r["disabled"] for r in v.rules], [False, False, True, True])
+        v.setEnabled(2, True)
+        self.assertEqual([r["disabled"] for r in v.rules], [False, False, False, True])
+        self.assertEqual(v.selected, 3)
 
     def test_windows_and_why(self):
         v = self.view
@@ -493,7 +571,9 @@ class View(Base):
         self.assertEqual({w["id"]: w["status"] for w in v.windows}, {1: "yes", 2: "no", 3: "no", 4: "no"})
         v.selectWindow(1)
         why = v.why
-        self.assertEqual([r["status"] for r in why["rules"]], ["no", "yes"])
+        # The rounded-corners example matches every window, but it is turned off.
+        self.assertEqual([r["status"] for r in why["rules"]], ["no", "yes", "no", "no"])
+        self.assertEqual(why["rules"][3]["reason"], "turned off")
         self.assertEqual([(x["label"], x["value"]) for x in why["values"]], [("Open floating", "true")])
         self.assertEqual(v.rules[1]["status"], "yes")
         v.selectWindow(1)                      # again: deselect
@@ -503,7 +583,7 @@ class View(Base):
         v = self.view
         v.selectWindow(3)
         v.newRule("opacity")
-        self.assertEqual(v.selected, 2)
+        self.assertEqual(v.selected, 4)
         self.assertIn('// foot opacity\nwindow-rule {\n    match app-id="^foot$"\n    opacity 0.92\n}', self.text())
         self.assertEqual({w["id"]: w["status"] for w in v.windows}[3], "yes")
         v.newRule("blank")
@@ -556,10 +636,11 @@ class View(Base):
         v.moveRule(-1)
         self.assertEqual(v.selected, 0)
         self.assertTrue(v.detail["first"])
-        v.select(1)
+        v.select(3)
         v.removeRule()
-        self.assertEqual(v.selected, 0)
-        v.removeRule()
+        self.assertEqual(v.selected, 2)
+        for _ in range(3):
+            v.removeRule()
         self.assertEqual(v.selected, -1)
         self.assertFalse(v.detail["has"])
 
