@@ -3,9 +3,10 @@
 Matching follows niri: a rule applies when the window matches any `match`
 directive (or there are none) and no `exclude` directive. All matchers in
 one directive must hold. `app-id` and `title` are Rust regexes searched
-anywhere in the string. A matcher that cannot be checked from IPC state (or a
-regex Python cannot reproduce) gives "unknown" instead of a guess, so a rule
-is shown as applying, not applying, or maybe applying.
+anywhere in the string; syntax Python's `re` lacks is handed to the `regex`
+package when it is installed. A matcher that cannot be checked from IPC state
+(or a regex neither can reproduce) gives "unknown" instead of a guess, so a
+rule is shown as applying, not applying, or maybe applying.
 
 Merging follows niri too: rules are applied top to bottom, a later rule
 replaces each property it sets, and the blocks in MERGED_BLOCKS merge child
@@ -25,6 +26,11 @@ from dataclasses import dataclass
 from . import niri_core
 from .schema import window_rules as schema
 
+try:
+    import regex as _regex      # optional: Unicode classes, class set operations, scoped flags
+except ImportError:
+    _regex = None
+
 NAME = "window-rule"
 YES, NO, MAYBE = "yes", "no", "maybe"
 
@@ -42,11 +48,13 @@ class Unsupported(Exception):
     pass
 
 
-def _translate(p: str) -> str:
+def _translate(p: str, rich: bool = False) -> str:
     """Rewrite the parts of Rust regex syntax that Python reads differently.
 
-    Raises Unsupported for syntax Python has no equivalent for (Unicode
-    classes, class set operations, flags in the middle of a pattern).
+    Raises Unsupported for syntax Python has no equivalent for. With `rich`
+    the result is for the `regex` package in V1 mode, which also reads
+    Unicode classes, class set operations and flags in the middle of a
+    pattern the way Rust does.
     """
     out, i, n = [], 0, len(p)
     multiline = False
@@ -64,7 +72,11 @@ def _translate(p: str) -> str:
         if c == "\\":
             e = p[i + 1:i + 2]
             if e in ("p", "P"):
-                raise Unsupported("unicode class")
+                if not rich:
+                    raise Unsupported("unicode class")
+                out.append(p[i:i + 2])
+                i += 2
+                continue
             if e == "z":
                 out.append("\\Z")
             elif e == "x" and p[i + 2:i + 3] == "{":
@@ -79,43 +91,24 @@ def _translate(p: str) -> str:
             i += 2
             continue
         if c == "[":
-            j, cls = i + 1, ["["]
-            if p[j:j + 1] == "^":
-                cls.append("^")
-                j += 1
-            if p[j:j + 1] == "]":
-                cls.append("\\]")
-                j += 1
-            while j < n and p[j] != "]":
-                if p.startswith("[:", j):
-                    end = p.find(":]", j)
-                    name = p[j + 2:end].lstrip("^")
-                    if end < 0 or name not in _POSIX or p[j + 2] == "^":
-                        raise Unsupported("class")
-                    cls.append(_POSIX[name])
-                    j = end + 2
-                    continue
-                if p[j] == "[" or p[j:j + 2] in ("&&", "--", "~~"):
-                    raise Unsupported("class set")
-                if p[j] == "\\":
-                    if p[j + 1:j + 2] in ("p", "P"):
-                        raise Unsupported("unicode class")
-                    cls.append(p[j:j + 2])
-                    j += 2
-                    continue
-                cls.append(p[j])
-                j += 1
-            out.append("".join(cls) + "]")
-            i = j + 1
+            cls, i = _class(p, i, rich)
+            out.append(cls)
             continue
         if c == "(" and p.startswith("(?", i):
             if p.startswith("(?<", i) and p[i + 3:i + 4] not in ("=", "!"):
                 out.append("(?P<")
                 i += 3
                 continue
-            m = re.match(r"\(\?[a-zA-Z-]*\)", p[i:])
-            if m:
-                raise Unsupported("inline flags")
+            m = re.match(r"\(\?([a-zA-Z-]*)([):])", p[i:])
+            if m and (m.group(2) == ")" or rich):
+                flags = m.group(1)
+                if not rich or set(flags) - set("imsxu-") or "m" in flags or "-u" in flags \
+                        or (flags.startswith("-") and len(flags) == 1):
+                    raise Unsupported("inline flags")
+                kept = flags.replace("u", "")
+                out.append(f"(?{kept}{m.group(2)}" if kept.strip("-") else ("(?:" if m.group(2) == ":" else ""))
+                i += m.end()
+                continue
         if c == "$" and not multiline:
             out.append("\\Z")
             i += 1
@@ -125,12 +118,68 @@ def _translate(p: str) -> str:
     return "".join(out)
 
 
+def _class(p: str, i: int, rich: bool) -> tuple[str, int]:
+    """A bracketed class starting at p[i]; returns (translation, index after it)."""
+    n, j, cls = len(p), i + 1, ["["]
+    if p[j:j + 1] == "^":
+        cls.append("^")
+        j += 1
+    if p[j:j + 1] == "]":
+        cls.append("\\]")
+        j += 1
+    while j < n and p[j] != "]":
+        if p.startswith("[:", j):
+            end = p.find(":]", j)
+            name = p[j + 2:end]
+            negated = name.startswith("^")
+            name = name[1:] if negated else name
+            if end < 0 or name not in _POSIX or (negated and not rich):
+                raise Unsupported("class")
+            cls.append(f"[^{_POSIX[name]}]" if negated else _POSIX[name])
+            j = end + 2
+            continue
+        if p[j] == "[":
+            if not rich:
+                raise Unsupported("class set")
+            inner, j = _class(p, j, rich)
+            cls.append(inner)
+            continue
+        if p[j:j + 2] in ("&&", "--", "~~"):
+            if not rich:
+                raise Unsupported("class set")
+            cls.append(p[j:j + 2])
+            j += 2
+            continue
+        if p[j] == "\\":
+            if p[j + 1:j + 2] in ("p", "P") and not rich:
+                raise Unsupported("unicode class")
+            cls.append(p[j:j + 2])
+            j += 2
+            continue
+        # `||` is a set operation for `regex` V1 but two literal bars for Rust.
+        cls.append("\\|" if p[j] == "|" else p[j])
+        j += 1
+    return "".join(cls) + "]", j + 1
+
+
+def _compile(pattern: str):
+    try:
+        return re.compile(_translate(pattern))
+    except Unsupported:
+        if _regex is None:
+            raise
+    # Rust folds case simply (`(?i)ß` does not match "SS"); V1 folds fully
+    # unless told not to.
+    return _regex.compile("(?-f)" + _translate(pattern, rich=True), _regex.V1)
+
+
 def compile_regex(pattern: str):
     """A Python regex that behaves like niri's, or None if that is not possible."""
     if pattern not in _cache:
+        errors = (Unsupported, re.error, ValueError, IndexError) + ((_regex.error,) if _regex else ())
         try:
-            _cache[pattern] = re.compile(_translate(pattern))
-        except (Unsupported, re.error, ValueError, IndexError):
+            _cache[pattern] = _compile(pattern)
+        except errors:
             _cache[pattern] = None
     return _cache[pattern]
 
@@ -160,13 +209,46 @@ def readable(pattern: str) -> str:
 # Windows
 
 
+STARTUP = 60.0      # at-startup holds for niri's first minute
+_MARGIN = 1.0       # too close to call either way
+
+
+def _within_startup(t: float, start: float) -> bool | None:
+    since = t - start
+    return None if abs(since - STARTUP) < _MARGIN else since < STARTUP
+
+
+def startup(wid, clock: dict | None) -> tuple[bool | None, bool | None]:
+    """(at-startup now, at-startup when the window opened); None for unknown.
+
+    `clock` has niri's start time `niri_start`, the time `now`, `opened` (window
+    id -> when it was seen opening) and `client_start` (window id -> when the
+    window's process started, which is before the window opened).
+    """
+    start = (clock or {}).get("niri_start")
+    if start is None:
+        return None, None
+    now = _within_startup(clock["now"], start)
+    opened = clock.get("opened", {}).get(wid)
+    if opened is not None:
+        return now, _within_startup(opened, start)
+    if now:
+        return now, True            # niri is still in its first minute
+    client = clock.get("client_start", {}).get(wid)
+    if client is not None and _within_startup(client, start) is False:
+        return now, False           # its process started after the first minute
+    return now, None
+
+
 def facts(window: dict, workspaces: dict, cast_targets: set | None, focused_output: str | None,
-          column_sizes: dict | None = None) -> dict:
+          column_sizes: dict | None = None, clock: dict | None = None) -> dict:
     """What matchers can know about an open window. None means unknown.
 
     `column_sizes` maps (workspace id, column) to its number of tiled windows:
-    the only window of a column is always the active one in it.
+    the only window of a column is always the active one in it. `clock` is
+    described in `startup`.
     """
+    at_startup, opened_at_startup = startup(window.get("id"), clock)
     ws = workspaces.get(window.get("workspace_id")) or {}
     floating = bool(window.get("is_floating"))
     active = None
@@ -188,7 +270,8 @@ def facts(window: dict, workspaces: dict, cast_targets: set | None, focused_outp
         "is-active": active,
         "is-active-in-column": in_column,
         "is-window-cast-target": None if cast_targets is None else window.get("id") in cast_targets,
-        "at-startup": None,
+        "at-startup": at_startup,
+        OPENED_AT_STARTUP: opened_at_startup,
     }
 
 
@@ -203,6 +286,7 @@ OPEN_STATE = {
     "is-window-cast-target": False,
     "is-active-in-column": True,
 }
+OPENED_AT_STARTUP = "_opened-at-startup"    # not a matcher: at-startup as it was at open
 
 
 def at_open(f: dict) -> dict:
@@ -211,11 +295,12 @@ def at_open(f: dict) -> dict:
     app-id and title are taken as they are now; a window that changed its
     title since opening may have matched differently.
     """
-    return dict(f, **OPEN_STATE)
+    return dict(f, **OPEN_STATE, **{"at-startup": f.get(OPENED_AT_STARTUP)})
 
 
-def window_facts(windows: dict, workspaces: dict, cast_targets: set | None) -> dict:
-    """id -> facts for every open window."""
+def window_facts(windows: dict, workspaces: dict, cast_targets: set | None,
+                 clock: dict | None = None) -> dict:
+    """id -> facts for every open window; `clock` is described in `startup`."""
     sizes: dict[tuple, int] = {}
     for w in windows.values():
         pos = (w.get("layout") or {}).get("pos_in_scrolling_layout")
@@ -224,7 +309,7 @@ def window_facts(windows: dict, workspaces: dict, cast_targets: set | None) -> d
             sizes[key] = sizes.get(key, 0) + 1
     focused = next((w for w in workspaces.values() if w.get("is_focused")), None)
     output = focused.get("output") if focused else None
-    return {wid: facts(w, workspaces, cast_targets, output, sizes) for wid, w in windows.items()}
+    return {wid: facts(w, workspaces, cast_targets, output, sizes, clock) for wid, w in windows.items()}
 
 
 def cast_targets(reply) -> set | None:

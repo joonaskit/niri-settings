@@ -1,6 +1,10 @@
 """NiriState folds event-stream events without a running niri."""
+import os
+import time
 import unittest
+from unittest import mock
 
+from niri_settings import ipc
 from niri_settings.ipc import NiriState
 
 
@@ -31,6 +35,31 @@ class State(unittest.TestCase):
         self.state.apply({"WorkspaceActivated": {"id": 2, "focused": True}})
         self.assertEqual(self.state.focused_workspace()["id"], 2)
         self.assertFalse(self.state.apply({"KeyboardLayoutsChanged": {}}))
+
+    def test_open_times_are_recorded_for_windows_seen_opening(self):
+        state = NiriState(clock=lambda: 42.0)
+        state.apply({"WindowsChanged": {"windows": [window(1, 1, 1)]}})
+        self.assertEqual(state.opened, {})                        # already open: time unknown
+        state.apply({"WindowOpenedOrChanged": {"window": window(5, 2, 1)}})
+        state.apply({"WindowOpenedOrChanged": {"window": dict(window(1, 1, 1), title="new")}})
+        self.assertEqual(state.opened, {5: 42.0})                 # a change is not an open
+        state.apply({"WindowClosed": {"id": 5}})
+        self.assertEqual(state.opened, {})
+
+
+class Times(unittest.TestCase):
+    def test_process_started(self):
+        started = ipc.process_started(os.getpid())
+        self.assertIsNotNone(started)
+        self.assertLess(abs(time.time() - started), 3600 * 24 * 365)
+        self.assertLessEqual(started, time.time())
+        self.assertIsNone(ipc.process_started(2 ** 31))
+
+    def test_niri_pid_from_the_socket_name(self):
+        for path, pid in (("/run/user/1000/niri.wayland-1.2388.sock", 2388),
+                          ("/run/user/1000/other.sock", None)):
+            with mock.patch.object(ipc, "socket_path", return_value=path):
+                self.assertEqual(ipc.niri_pid(), pid)
 
 
 if __name__ == "__main__":

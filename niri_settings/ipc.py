@@ -12,6 +12,7 @@ import json
 import os
 import socket
 import threading
+import time
 
 
 def socket_path() -> str | None:
@@ -36,6 +37,36 @@ def request(message, timeout: float = 2.0):
     return reply.get("Ok") if isinstance(reply, dict) else None
 
 
+def process_started(pid) -> float | None:
+    """When a process started, as a Unix time; None if unknown."""
+    try:
+        with open(f"/proc/{int(pid)}/stat", encoding="ascii") as fh:
+            # The command name may hold spaces and parentheses: split after the last ")".
+            fields = fh.read().rsplit(")", 1)[1].split()
+        ticks = int(fields[19])     # field 22, starttime, in clock ticks since boot
+        with open("/proc/stat", encoding="ascii") as fh:
+            boot = next(int(line.split()[1]) for line in fh if line.startswith("btime "))
+        return boot + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration, TypeError):
+        return None
+
+
+def niri_pid() -> int | None:
+    """niri's pid, from the socket name `niri.<display>.<pid>.sock`."""
+    path = socket_path()
+    name = os.path.basename(path or "")
+    parts = name.split(".")
+    if len(parts) >= 4 and parts[0] == "niri" and parts[-1] == "sock" and parts[-2].isdigit():
+        return int(parts[-2])
+    return None
+
+
+def niri_started() -> float | None:
+    """When the running niri started, as a Unix time; None if unknown."""
+    pid = niri_pid()
+    return process_started(pid) if pid else None
+
+
 def version() -> str | None:
     reply = request("Version")
     return reply.get("Version") if isinstance(reply, dict) else None
@@ -49,9 +80,11 @@ def outputs() -> dict:
 class NiriState:
     """Windows and workspaces, kept current from event-stream events."""
 
-    def __init__(self):
+    def __init__(self, clock=time.time):
         self.windows: dict[int, dict] = {}
         self.workspaces: dict[int, dict] = {}
+        self.opened: dict[int, float] = {}   # window id -> Unix time it was seen opening
+        self._clock = clock
 
     def apply(self, event: dict) -> bool:
         """Fold one event in. Returns True if the state changed."""
@@ -60,14 +93,18 @@ class NiriState:
         (kind, data), = event.items()
         if kind == "WindowsChanged":
             self.windows = {w["id"]: w for w in data["windows"]}
+            self.opened = {k: v for k, v in self.opened.items() if k in self.windows}
         elif kind == "WindowOpenedOrChanged":
             w = data["window"]
+            if w["id"] not in self.windows:
+                self.opened[w["id"]] = self._clock()
             if w.get("is_focused"):
                 for other in self.windows.values():
                     other["is_focused"] = False
             self.windows[w["id"]] = w
         elif kind == "WindowClosed":
             self.windows.pop(data["id"], None)
+            self.opened.pop(data["id"], None)
         elif kind == "WindowFocusChanged":
             for w in self.windows.values():
                 w["is_focused"] = w["id"] == data["id"]
