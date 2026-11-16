@@ -44,6 +44,29 @@ map (media keys, wheel, mouse, or a key your layout does not have) are listed un
   before the app sees them, and this Qt build has no shortcuts-inhibit support, so a
   combination niri already uses must be picked on the map instead.
 
+## Settings pages
+
+Most pages are drawn from `app/schema/pages.py`. Each setting has a kind (the control), a
+config path, a label and niri's default. Each card shows where its value is set. That
+`file:line` link opens the source editor at the line, and Reset removes the setting so
+niri's default applies. The search box in the top bar covers every setting on every page.
+
+Config files lists each top-level section of the config and the page that edits it.
+`switch-events`, `debug`, `layer-rule` and `recent-windows › binds` are source-only for
+now.
+
+## Source editor
+
+Config files has an editor for each file of the include tree.
+
+- Text is checked as you type: what does not parse stays in the editor and is not taken.
+  What parses becomes one unsaved change for that file, is validated with
+  `niri validate` like any other change, and is written only by Save.
+- The bar under the editor names the setting on the cursor's line and opens its page.
+- In managed mode your own files are read-only here too.
+- An outside edit to a file you are editing as text is a conflict, resolved in the
+  banner like any other.
+
 ## Window rules
 
 The page lists every `window-rule` in the order niri reads them, across include files. A
@@ -82,8 +105,8 @@ app/
   binds_view.py  the Key bindings page's object in QML
   rules.py       window rules: matching, merging, edits (no Qt)
   rules_view.py  the Window rules page's object in QML
-  schema/        settings definitions that drive the forms; the action catalogue;
-                 window-rule matchers, properties and templates
+  schema/        settings definitions that drive the forms (pages.py, layout.py);
+                 the action catalogue; window-rule matchers, properties and templates
   qml/           Theme.qml (style tokens), shared controls, pages
 tests/
   corpus/        config trees used by the round-trip tests

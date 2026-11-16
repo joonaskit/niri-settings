@@ -20,8 +20,10 @@ import time
 from . import niri_core
 
 # Repeated top-level sections tracked as one ordered list each: removing or
-# moving one rule shifts the index of every rule after it.
-RULES = ("window-rule", "layer-rule")
+# moving one entry shifts the index of every entry after it.
+RULES = ("window-rule", "layer-rule", "spawn-at-startup", "spawn-sh-at-startup")
+# A raw edit of a whole file in the source editor is tracked as "file:<path>".
+FILE = "file:"
 PREVIEW_NAME = "niri-gui-preview.kdl"
 MANAGED_NAME = "niri-gui.kdl"
 IN_PLACE, MANAGED = "in-place", "managed"
@@ -122,9 +124,11 @@ class Config:
         return default if value is None else value
 
     def _value(self, path: str):
-        """What a tracked path holds now: a value, or a list of rules."""
+        """What a tracked path holds now: a value, a list of rules, or a file's text."""
         if path in RULES:
             return self.rules(path)
+        if path.startswith(FILE):
+            return self.tree.render(path[len(FILE):])
         return self.tree.get(path)
 
     def rules(self, name: str) -> list[dict]:
@@ -280,8 +284,25 @@ class Config:
         self.tree.rename(path, new_name, files.pop())
         self._settle()
 
+    def set_text(self, file: str, text: str):
+        """Replace one file's text from the source editor. Raises KdlError if
+        it does not parse, and ReadOnlyError for a file managed mode protects."""
+        file = os.path.normpath(file)
+        if not self._writable(file):
+            raise ReadOnlyError(f"{os.path.basename(file)} is read-only in managed mode. "
+                                "Switch to in-place mode to edit it here.")
+        if self.tree.render(file) == text:
+            return
+        self._track(FILE + file)
+        try:
+            self.tree.set_text(file, text)
+        finally:
+            self._settle()
+
     def _apply(self, path: str, value):
-        if path in RULES:
+        if path.startswith(FILE):
+            self.set_text(path[len(FILE):], value)
+        elif path in RULES:
             self.set_rules(path, value or [])
         elif value is None:
             self.remove(path)
@@ -731,7 +752,7 @@ class Config:
         root: dict = {}
         for path, value in self.pending.items():
             parts = path.split("/")
-            if parts[0] in RULES:
+            if parts[0] in RULES or path.startswith(FILE):
                 # Rules apply on save: an overlay can add a rule but not
                 # change or remove one, so it cannot show an edit faithfully.
                 continue

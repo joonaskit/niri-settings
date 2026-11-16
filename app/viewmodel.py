@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
+import shlex
 import time
 
 from PySide6.QtCore import (Property, QFileSystemWatcher, QObject, QTimer, Signal, Slot)
 
 from . import ipc, niri_core
-from .config import MANAGED, RULES, Config, ReadOnlyError
+from .config import FILE, MANAGED, RULES, Config, ReadOnlyError
 from .schema import layout as layout_schema
+from .schema import pages as page_schema
 
 # (group, [(page id, title)]) in sidebar order, from the concept screens.
 SECTIONS = [
@@ -21,7 +23,7 @@ SECTIONS = [
                ("gestures", "Gestures & hot corners")]),
     ("Rules & session", [("window-rules", "Window rules"), ("layer-rules", "Layer rules"),
                          ("startup", "Startup apps"), ("environment", "Environment"),
-                         ("files", "Config files")]),
+                         ("misc", "Miscellaneous"), ("files", "Config files")]),
 ]
 
 SAMPLE_COLUMNS = [("Terminal", 1 / 3), ("Firefox", None), ("Editor", None), ("Files", 1 / 3)]
@@ -59,6 +61,7 @@ def _fraction_label(p: float) -> str:
 
 
 class Backend(QObject):
+    sourceRequested = Signal(str, int)   # open Config files at file, line
     changed = Signal()         # config values, pending count, validation
     stateChanged = Signal()    # niri windows / workspaces
     _ipcEvent = Signal()       # from the event-stream thread
@@ -227,8 +230,15 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=changed)
     def conflicts(self):
-        return [{"path": p.replace("/", " › ") if p not in RULES else p + "s", "mine": _show(c["mine"]), "disk": _show(c["disk"])}
-                for p, c in self.config.conflicts.items()]
+        out = []
+        for p, c in self.config.conflicts.items():
+            if p.startswith(FILE):
+                out.append({"path": os.path.basename(p[len(FILE):]) + " (edited as text)",
+                            "mine": "your text", "disk": "the file's new text"})
+            else:
+                out.append({"path": p.replace("/", " › ") if p not in RULES else p + "s",
+                            "mine": _show(c["mine"]), "disk": _show(c["disk"])})
+        return out
 
     @Slot(bool)
     def resolveConflicts(self, keep_mine):
@@ -490,3 +500,333 @@ class Backend(QObject):
     @Property(bool, notify=stateChanged)
     def previewIsLive(self):
         return self._stream is not None and bool(self.state.windows)
+
+    # -- schema-driven pages
+
+    @Property("QVariantMap", constant=True)
+    def pages(self):
+        return page_schema.PAGES
+
+    @Property("QVariantList", constant=True)
+    def coverage(self):
+        titles = {i: t for _, pages in SECTIONS for i, t in pages}
+        return [{"section": s, "page": p, "pageTitle": titles.get(p, ""), "note": note}
+                for s, p, note in page_schema.COVERAGE]
+
+    @Slot(str, result="QVariantList")
+    def searchSettings(self, query):
+        """Settings of every schema page whose label, path or hint matches."""
+        q = query.strip().lower()
+        titles = {i: t for _, pages in SECTIONS for i, t in pages}
+        out = []
+        if not q:
+            return out
+        for page_id, page in page_schema.PAGES.items():
+            for group in page["groups"]:
+                for s in group["settings"]:
+                    text = " ".join([s["label"], s["path"], s.get("hint", "")]).lower()
+                    if all(word in text for word in q.split()):
+                        out.append({"page": page_id, "pageTitle": titles.get(page_id, page["title"]),
+                                    "setting": s})
+        return out
+
+    @Slot(str, result=str)
+    def pageOf(self, path):
+        return page_schema.page_for(path) or ""
+
+    def _apply_edit(self, fn):
+        if self._edit(fn):
+            self._touch()
+
+    @Slot(str)
+    def resetValue(self, path):
+        """Remove a setting so niri's default applies."""
+        if self.config.get(path) is not None:
+            self._apply_edit(lambda: self.config.remove(path))
+
+    @Slot(str, "QVariant")
+    def setDecimal(self, path, value):
+        try:
+            number = float(str(value).strip().replace(",", "."))
+        except ValueError:
+            return
+        if self.config.get(path) != number:
+            self._apply_edit(lambda: self.config.set(path, number))
+
+    @Slot(str, str)
+    def setText(self, path, text):
+        """A string setting; empty text removes it."""
+        if text == "":
+            self.resetValue(path)
+        elif self.config.get(path) != text:
+            self._apply_edit(lambda: self.config.set(path, text))
+
+    @Slot(str, str, result=str)
+    def setNumbers(self, path, text):
+        """Several numbers as one node, e.g. a calibration matrix. Returns an error or ""."""
+        if not text.strip():
+            self.resetValue(path)
+            return ""
+        try:
+            numbers = [float(x) for x in text.replace(",", " ").split()]
+        except ValueError:
+            return "Type numbers separated by spaces"
+        value = {"args": numbers, "props": {}}
+        if self.config.get(path) != value:
+            self._apply_edit(lambda: self.config.set(path, value))
+        return ""
+
+    @Slot(str, bool, bool)
+    def setBool(self, path, on, default):
+        """A node that takes true / false; niri's default removes it."""
+        if on == default:
+            self.resetValue(path)
+        elif self.config.get(path) is not on:
+            # Written as `name true`: a bare `name` is a flag, which these nodes reject.
+            self._apply_edit(lambda: self.config.set(path, {"args": [on], "props": {}}))
+
+    @Slot(str, bool, result=bool)
+    def isEnabled(self, path, default):
+        """A section that is on unless it has an `off` flag."""
+        if self.config.get(path + "/off") is not None:
+            return False
+        return default or self.config.get(path) is not None
+
+    @Slot(str, bool)
+    def setEnabled(self, path, on):
+        if on:
+            self.resetValue(path + "/off")
+        elif self.config.get(path + "/off") is None:
+            self._apply_edit(lambda: self.config.set(path + "/off", True))
+
+    @Slot(str, int, int)
+    def setXY(self, path, x, y):
+        value = {"args": [], "props": {"x": int(x), "y": int(y)}}
+        if self.config.get(path) != value:
+            self._apply_edit(lambda: self.config.set(path, value))
+
+    @Slot(str, result="QVariantList")
+    def xy(self, path):
+        v = self.config.get(path)
+        props = v.get("props", {}) if isinstance(v, dict) else {}
+        return [props.get("x"), props.get("y")] if props else []
+
+    @Slot(str, result="QVariant")
+    def text(self, path):
+        """A value as it is written after the node name, for text fields."""
+        v = self.config.get(path)
+        if v is None or v is True:
+            return ""
+        if isinstance(v, dict):
+            return " ".join(niri_core.format_value(a) for a in v.get("args", []))
+        return str(v) if isinstance(v, str) else niri_core.format_value(v)
+
+    # animations
+
+    @Slot(str, result="QVariantMap")
+    def animation(self, path):
+        cfg = self.config
+        spring = cfg.get(path + "/spring")
+        props = spring.get("props", {}) if isinstance(spring, dict) else {}
+        if cfg.get(path + "/off") is not None:
+            mode = "off"
+        elif spring is not None:
+            mode = "spring"
+        elif cfg.get(path + "/duration-ms") is not None or cfg.get(path + "/curve") is not None:
+            mode = "easing"
+        else:
+            mode = "default"
+        curve = cfg.get(path + "/curve")
+        return {"mode": mode, "damping": props.get("damping-ratio", 1.0), "stiffness": props.get("stiffness", 800),
+                "epsilon": props.get("epsilon", 0.0001), "duration": cfg.get(path + "/duration-ms", 250),
+                "curve": curve if isinstance(curve, str) else "ease-out-cubic"}
+
+    @Slot(str, str)
+    def setAnimationMode(self, path, mode):
+        cfg = self.config
+        current = self.animation(path)
+        if mode == current["mode"]:
+            return
+
+        def apply():
+            for leaf in ("off", "spring", "duration-ms", "curve"):
+                if cfg.get(f"{path}/{leaf}") is not None and not (mode == "off" and leaf != "off"):
+                    cfg.remove(f"{path}/{leaf}")
+            if mode == "off":
+                cfg.set(path + "/off", True)
+            elif mode == "spring":
+                cfg.set(path + "/spring", {"args": [], "props": {
+                    "damping-ratio": 1.0, "stiffness": 800, "epsilon": 0.0001}})
+            elif mode == "easing":
+                cfg.set(path + "/duration-ms", 250)
+                cfg.set(path + "/curve", "ease-out-cubic")
+        self._apply_edit(apply)
+
+    @Slot(str, "QVariant", "QVariant", "QVariant")
+    def setSpring(self, path, damping, stiffness, epsilon):
+        try:
+            value = {"args": [], "props": {"damping-ratio": float(str(damping).replace(",", ".")),
+                                           "stiffness": int(float(stiffness)),
+                                           "epsilon": float(str(epsilon).replace(",", "."))}}
+        except ValueError:
+            return
+        if self.config.get(path + "/spring") != value:
+            self._apply_edit(lambda: self.config.set(path + "/spring", value))
+
+    # named workspaces
+
+    @Property("QVariantList", notify=changed)
+    def workspaces(self):
+        out = []
+        for p in self.config.tree.list(""):
+            if not p.startswith("workspace["):
+                continue
+            name = p[len("workspace["):-1]
+            src = self.config.source(p)
+            output = self.config.get(p + "/open-on-output")
+            out.append({"name": name, "output": output if isinstance(output, str) else "",
+                        "where": f"{os.path.basename(src['file'])}:{src['line']}" if src else ""})
+        return out
+
+    @Slot(str, result=str)
+    def addWorkspace(self, name):
+        name = name.strip()
+        if not name:
+            return "Type a name"
+        if any(w["name"] == name for w in self.workspaces):
+            return f"There is already a workspace called {name}"
+        self._apply_edit(lambda: self.config.set(f"workspace[{name}]", True))
+        return ""
+
+    @Slot(str)
+    def removeWorkspace(self, name):
+        self._apply_edit(lambda: self.config.remove(f"workspace[{name}]"))
+
+    @Slot(str, str)
+    def setWorkspaceOutput(self, name, output):
+        path = f"workspace[{name}]/open-on-output"
+        if output.strip():
+            if self.config.get(path) != output.strip():
+                self._apply_edit(lambda: self.config.set(path, output.strip()))
+        else:
+            self.resetValue(path)
+
+    @Property("QVariantList", notify=changed)
+    def outputNames(self):
+        names = list(self._outputs)
+        names += [p[len("output["):-1] for p in self.config.tree.list("") if p.startswith("output[")]
+        return sorted(set(names))
+
+    # startup commands
+
+    @Slot(str, result="QVariantList")
+    def startupList(self, kind):
+        out = []
+        for i, entry in enumerate(self.config.rules(kind)):
+            args = [str(a) for a in entry.get("args", [])]
+            text = args[0] if kind == "spawn-sh-at-startup" and args else shlex.join(args)
+            out.append({"index": i, "text": text})
+        return out
+
+    @Slot(str, int, str, result=str)
+    def setStartup(self, kind, index, text):
+        """Add (index -1) or change one startup command. Returns an error or ""."""
+        text = text.strip()
+        if not text:
+            return "Type a command"
+        if kind == "spawn-sh-at-startup":
+            args = [text]
+        else:
+            try:
+                args = shlex.split(text)
+            except ValueError as e:
+                return f"Check the quotes: {e}"
+        entries = self.config.rules(kind)
+        entry = {"args": args, "props": {}, "comment": ""}
+        if 0 <= index < len(entries):
+            if entries[index].get("args") == args:
+                return ""
+            entry["comment"] = entries[index].get("comment", "")
+            entries[index] = entry
+        else:
+            entries.append(entry)
+        self._apply_edit(lambda: self.config.set_rules(kind, entries))
+        return ""
+
+    @Slot(str, int)
+    def removeStartup(self, kind, index):
+        entries = self.config.rules(kind)
+        if 0 <= index < len(entries):
+            del entries[index]
+            self._apply_edit(lambda: self.config.set_rules(kind, entries))
+
+    # environment
+
+    @Property("QVariantList", notify=changed)
+    def environment(self):
+        found: dict[str, dict] = {}
+        for e in self.config.tree.entries("environment"):
+            args = e["value"]["args"]
+            value = args[0] if args else None
+            found[e["name"]] = {"name": e["name"], "value": "" if value is None else str(value),
+                                "unset": value is None,
+                                "where": f"{os.path.basename(e['file'])}:{e['line']}"}
+        return list(found.values())
+
+    @Slot(str, str, result=str)
+    def setEnv(self, name, value):
+        name = name.strip()
+        if not name or any(c in name for c in " =/\\"):
+            return "A variable name has no spaces, = or slashes"
+        if self.config.get(f"environment/{name}") != value:
+            self._apply_edit(lambda: self.config.set(f"environment/{name}", value))
+        return ""
+
+    @Slot(str)
+    def removeEnv(self, name):
+        self._apply_edit(lambda: self.config.remove(f"environment/{name}"))
+
+    # -- source editor and links between settings and source
+
+    @Slot(str)
+    def showSource(self, path):
+        """Open Config files where a setting is written."""
+        src = self.config.source(path)
+        if src:
+            self.sourceRequested.emit(src["file"], src["line"])
+
+    @Slot(str, result=str)
+    def fileText(self, path):
+        try:
+            return self.config.tree.render(path)
+        except KeyError:
+            return ""
+
+    @Slot(str, result=bool)
+    def fileWritable(self, path):
+        return self.config._writable(os.path.normpath(path))
+
+    @Slot(str, str, result="QVariantMap")
+    def setFileText(self, path, text):
+        """Take the editor's text as an unsaved change. Returns {error, line}."""
+        try:
+            self.config.set_text(path, text)
+        except niri_core.KdlError as e:
+            return {"error": e.message, "line": e.line}
+        except ReadOnlyError as e:
+            return {"error": str(e), "line": 0}
+        self._rewatch()
+        self._touch()
+        return {"error": "", "line": 0}
+
+    @Slot(str, int, result="QVariantMap")
+    def pathAt(self, path, line):
+        """The setting on a line of a file, and the page that edits it."""
+        try:
+            at = self.config.tree.path_at(path, line)
+        except (KeyError, niri_core.KdlError):
+            at = None
+        page = page_schema.page_for(at) if at else None
+        titles = {i: t for _, pages in SECTIONS for i, t in pages}
+        return {"path": (at or "").replace("/", " › "), "page": page or "",
+                "pageTitle": titles.get(page, "") if page else ""}

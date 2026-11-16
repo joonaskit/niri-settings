@@ -340,8 +340,10 @@ def format_value(value: object) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
+        # Always with a decimal point: niri reads `1` and `1.0` differently
+        # for some decimal properties (spring damping-ratio rejects `1`).
         if value == int(value) and abs(value) < 1e15:
-            return str(int(value))
+            return f"{int(value)}.0"
         return repr(round(value, 6))
     text = str(value)
     if isinstance(value, Raw) and ("\\" in text or '"' in text) and '"#' not in text \
@@ -400,7 +402,9 @@ def _child_lines(c: dict, indent: str) -> list[str]:
 def format_block(name: str, value: dict, indent: str = "") -> str:
     """A whole node written over several lines, the way rules usually are."""
     head = _format_head({"name": name, "args": value.get("args", []), "props": value.get("props", {})})
-    kids = value.get("children") or []
+    if "children" not in value:
+        return indent + head
+    kids = value["children"]
     if not kids:
         return indent + head + " {}"
     lines = [indent + head + " {"]
@@ -499,6 +503,14 @@ def _whole_value(node: Node) -> dict:
     """A node together with its children, for sections listed in WHOLE."""
     return {"args": node.args, "props": node.props,
             "children": [_child_value(c) for c in (node.children or [])]}
+
+
+def _top_value(node: Node) -> dict:
+    """A top-level node: {args, props}, and `children` only when it has a block."""
+    value = {"args": node.args, "props": node.props}
+    if node.children is not None:
+        value["children"] = [_child_value(c) for c in node.children]
+    return value
 
 
 def _is_whole(path: str) -> bool:
@@ -935,7 +947,7 @@ class Tree:
             lines = self._comment_lines(f, node)
             out.append({"file": f.path, "line": f.text.count("\n", 0, node.start) + 1,
                         "end_line": f.text.count("\n", 0, max(node.start, node.end - 1)) + 1,
-                        "value": _whole_value(node), "comment": self._comment_of(f, node),
+                        "value": _top_value(node), "comment": self._comment_of(f, node),
                         "text": f.text[node.start:node.end],
                         "full_text": f.text[lines[0][0] if lines else node.start:node.end]})
         return out
@@ -1126,6 +1138,20 @@ class Tree:
 
     def dirty_files(self) -> list[str]:
         return [p for p, f in self._files.items() if f.text != f.original]
+
+    def set_text(self, file: str, text: str):
+        """Replace a file's whole text (the source editor). Raises KdlError,
+        changing nothing, if it does not parse. New includes are loaded."""
+        f = self._file(file)
+        nodes = _Parser(text, f.path).parse()
+        f.text, f.nodes = text, nodes
+        for node in nodes:
+            if node.name == "include":
+                target = self._include_target(f, node)
+                if target and target not in self._files:
+                    line = text.count("\n", 0, node.start) + 1
+                    self._load(target, bool(node.props.get("optional")), (f.path, line),
+                               self._depth.get(f.path, 0) + 1)
 
     def reload_file(self, file: str):
         """Re-read one file from disk, dropping its in-memory edits."""
