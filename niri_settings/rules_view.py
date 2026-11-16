@@ -12,6 +12,7 @@ import threading
 import time
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtQml import QJSValue
 
 from . import ipc, niri_core
 from . import rules as rl
@@ -453,6 +454,8 @@ class RuleListView(QObject):
         i = self._current()
         if i < 0:
             return
+        if isinstance(value, QJSValue):
+            value = value.toVariant()
         if isinstance(value, dict) or hasattr(value, "keys"):
             value = dict(value)
         try:
