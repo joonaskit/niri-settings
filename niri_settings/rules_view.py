@@ -490,7 +490,9 @@ class RulesView(QObject):
             touching = [{"index": i, "title": rl.title(r), "status": v.status, "reason": v.reason}
                         for i, (r, v) in enumerate(zip(rules, verdicts))]
             values = []
-            for m in rl.merged(rules, verdicts):
+            f = self._facts().get(self._window)
+            opened = [rl.check_rule(r, rl.at_open(f)) for r in rules] if f else None
+            for m in rl.merged(rules, verdicts, opened):
                 values.append({"label": rl.label_of(m["path"]), "value": m["value"],
                                "rule": rl.title(rules[m["rule"]]), "ruleIndex": m["rule"],
                                "when": rl.when_of(m["path"]), "maybe": m["maybe"],
