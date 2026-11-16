@@ -364,7 +364,7 @@ COVERAGE = [
     ("switch-events", "source", "Lid and tablet-mode actions: edit in Config files"),
     ("layout", "layout", "Layout; Appearance & blur"),
     ("window-rule", "window-rules", "Window rules"),
-    ("layer-rule", "source", "Layer rules page not built yet (issue #8)"),
+    ("layer-rule", "layer-rules", "Layer rules"),
     ("animations", "animations", "Animations"),
     ("gestures", "gestures", "Gestures & hot corners"),
     ("recent-windows", "overview", "Overview & Alt-Tab; its binds in Config files"),

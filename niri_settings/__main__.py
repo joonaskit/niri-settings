@@ -12,7 +12,7 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from . import __version__
 from .binds_view import BindsView
 from .displays_view import DisplaysView
-from .rules_view import RulesView
+from .rules_view import LayerRulesView, RulesView
 from .viewmodel import Backend
 
 APP_ID = "io.github.joonaskit.NiriSettings"  # desktop file, icon and Wayland app-id
@@ -42,6 +42,7 @@ def main() -> int:
     displays = DisplaysView(backend)
     binds = BindsView(backend)
     rules = RulesView(backend)
+    layer_rules = LayerRulesView(backend)
     app.aboutToQuit.connect(displays.shutdown)
     app.aboutToQuit.connect(backend.shutdown)
 
@@ -50,6 +51,7 @@ def main() -> int:
     engine.rootContext().setContextProperty("displays", displays)
     engine.rootContext().setContextProperty("binds", binds)
     engine.rootContext().setContextProperty("rules", rules)
+    engine.rootContext().setContextProperty("layerRules", layer_rules)
     engine.load(os.path.join(HERE, "qml", "Main.qml"))
     if not engine.rootObjects():
         return 1

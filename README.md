@@ -79,7 +79,7 @@ config path, a label and niri's default. Each card shows where its value is set.
 niri's default applies. The search box in the top bar covers every setting on every page.
 
 Config files lists each top-level section of the config and the page that edits it.
-`switch-events`, `debug`, `layer-rule` and `recent-windows › binds` are source-only for
+`switch-events`, `debug` and `recent-windows › binds` are source-only for
 now.
 
 ## Source editor
@@ -120,6 +120,18 @@ rule's name is the first line of the `//` comment right above it.
   and the `focus-ring`, `border`, `shadow`, `tab-indicator`, `background-effect` and
   `popups` blocks merge child by child. "Pick a window…" uses `niri msg pick-window`.
 
+## Layer rules
+
+The Layer rules page is the Window rules page for `layer-rule`, and edits the same way.
+
+- It matches against the layer surfaces from `niri msg layers`, polled every two seconds
+  while the page is open because niri does not stream them.
+- Matchers are `namespace` (a regex, like app-id), `layer` (background, bottom, top or
+  overlay) and `at-startup`. `at-startup` is judged by niri's age now, which assumes niri
+  rechecks layer rules when its first minute ends (not yet tested against a nested niri).
+- Every property applies continuously; there is nothing read only at open. `shadow`,
+  `background-effect` and `popups` merge child by child.
+
 ## Layout
 
 ```
@@ -134,10 +146,10 @@ niri_settings/
   keymap.py      xkb keymap (libxkbcommon via ctypes) and the physical key layout
   binds.py       key bindings: conflicts, edits, the lockout check (no Qt)
   binds_view.py  the Key bindings page's object in QML
-  rules.py       window rules: matching, merging, edits (no Qt)
-  rules_view.py  the Window rules page's object in QML
+  rules.py       window and layer rules: matching, merging, edits (no Qt)
+  rules_view.py  the Window rules and Layer rules pages' objects in QML
   schema/        settings definitions that drive the forms (pages.py, layout.py);
-                 the action catalogue; window-rule matchers, properties and templates
+                 the action catalogue; window- and layer-rule matchers, properties and templates
   qml/           Theme.qml (style tokens), shared controls, pages, the first-run dialog
   fonts/         Inter and JetBrains Mono (OFL), so the app looks the same everywhere
 data/            desktop entry and AppStream metainfo

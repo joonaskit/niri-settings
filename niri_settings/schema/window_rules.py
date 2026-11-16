@@ -10,13 +10,19 @@ flags of a block. `kind` picks the editor:
     position  x= y= relative-to=       xy           x= y= (shadow offset)
     kdl       anything else, edited as the KDL after the node name
 
+Matcher kinds: regex, bool, and enum (one of `options`).
+
 `when` is "open" for properties niri reads once, when the window opens, and
 "always" for those it keeps applying.
 """
 
+NAME = "window-rule"
+SUBJECT = "window"           # what a rule matches, for messages
+SUBJECTS = "windows"
+
 MATCHERS = [
-    {"key": "app-id", "label": "app-id", "kind": "regex"},
-    {"key": "title", "label": "title", "kind": "regex"},
+    {"key": "app-id", "label": "app-id", "kind": "regex", "example": "^firefox$"},
+    {"key": "title", "label": "title", "kind": "regex", "example": "^Picture-in-Picture$"},
     {"key": "is-active", "label": "is active", "kind": "bool"},
     {"key": "is-focused", "label": "is focused", "kind": "bool"},
     {"key": "is-active-in-column", "label": "is active in column", "kind": "bool"},

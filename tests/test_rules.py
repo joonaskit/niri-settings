@@ -11,7 +11,7 @@ from niri_settings import ipc, niri_core
 from niri_settings import rules as rl
 from niri_settings.config import MANAGED, Config, ReadOnlyError
 from niri_settings.rules import RulesModel
-from niri_settings.rules_view import RulesView
+from niri_settings.rules_view import LayerRulesView, RulesView
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT = os.path.join(HERE, "corpus", "default", "config.kdl")
@@ -174,7 +174,7 @@ class CoreEdits(Base):
     @unittest.skipUnless(HAVE_NIRI, "niri is not installed")
     def test_niri_accepts_what_is_written(self):
         cfg = self.load()
-        self.model.add(rl.from_template(next(t for t in rl.schema.TEMPLATES if t["id"] == "pip"), None))
+        self.model.add(rl.from_template(next(t for t in rl.WINDOW.TEMPLATES if t["id"] == "pip"), None))
         i = len(cfg.rules("window-rule")) - 1
         for path, node in [("default-window-height", {"args": [], "props": {}, "children": [prop("fixed", 270)]}),
                            ("focus-ring/state", {"args": ["off"], "props": {}}),
@@ -568,24 +568,24 @@ class View(Base):
     def test_windows_and_why(self):
         v = self.view
         v.select(1)
-        self.assertEqual({w["id"]: w["status"] for w in v.windows}, {1: "yes", 2: "no", 3: "no", 4: "no"})
-        v.selectWindow(1)
+        self.assertEqual({w["id"]: w["status"] for w in v.targets}, {1: "yes", 2: "no", 3: "no", 4: "no"})
+        v.selectTarget(1)
         why = v.why
         # The rounded-corners example matches every window, but it is turned off.
         self.assertEqual([r["status"] for r in why["rules"]], ["no", "yes", "no", "no"])
         self.assertEqual(why["rules"][3]["reason"], "turned off")
         self.assertEqual([(x["label"], x["value"]) for x in why["values"]], [("Open floating", "true")])
         self.assertEqual(v.rules[1]["status"], "yes")
-        v.selectWindow(1)                      # again: deselect
+        v.selectTarget(1)                      # again: deselect
         self.assertFalse(v.why["has"])
 
     def test_template_uses_the_selected_window(self):
         v = self.view
-        v.selectWindow(3)
+        v.selectTarget(3)
         v.newRule("opacity")
         self.assertEqual(v.selected, 4)
         self.assertIn('// foot opacity\nwindow-rule {\n    match app-id="^foot$"\n    opacity 0.92\n}', self.text())
-        self.assertEqual({w["id"]: w["status"] for w in v.windows}[3], "yes")
+        self.assertEqual({w["id"]: w["status"] for w in v.targets}[3], "yes")
         v.newRule("blank")
         self.assertIn('// Rule for foot\nwindow-rule {\n    match app-id="^foot$"\n}', self.text())
 
@@ -622,12 +622,12 @@ class View(Base):
         v.setMatcher("match", 0, "title", "^PiP$")
         v.addMatcher("match", 0, "is-floating")
         self.assertIn('match app-id=r#"firefox$"# title="^PiP$" is-floating=true\n', self.text())
-        v.selectWindow(2)
+        v.selectTarget(2)
         v.addDirective("exclude")
         self.assertIn('    exclude app-id=r#"^org\\.mozilla\\.firefox$"#\n', self.text())
         v.removeMatcher("exclude", 0, "app-id")          # its last matcher: the line goes
         self.assertNotIn("exclude", self.text())
-        v.fillFromWindow("title")
+        v.fillFromTarget("title")
         self.assertIn('title="^GitHub — Mozilla Firefox$"', self.text())
 
     def test_remove_and_move_keep_a_selection(self):
@@ -643,6 +643,143 @@ class View(Base):
             v.removeRule()
         self.assertEqual(v.selected, -1)
         self.assertFalse(v.detail["has"])
+
+
+LAYERS = [
+    {"namespace": "waybar", "output": "DP-1", "layer": "Top", "keyboard_interactivity": "None"},
+    {"namespace": "waybar", "output": "DP-1", "layer": "Top", "keyboard_interactivity": "None"},
+    {"namespace": "wallpaper", "output": "DP-1", "layer": "Background", "keyboard_interactivity": "None"},
+    {"namespace": "notifications", "output": "DP-1", "layer": "Overlay", "keyboard_interactivity": "None"},
+]
+
+
+class LayerRules(Base):
+    """Layer rules: the same model with the layer schema, matched against `niri msg layers`."""
+
+    def setUp(self):
+        super().setUp()
+        self.app = QCoreApplication.instance() or QCoreApplication([])
+        self.load()
+        self.model = RulesModel(lambda: self.config, rl.LAYER)
+        self.backend = StubBackend(self.config)
+        self.view = LayerRulesView(self.backend, self.model)
+        self.view._layers = copy.deepcopy(LAYERS)
+
+    def test_facts(self):
+        start = 1000.0
+        f = rl.layer_facts(LAYERS, {"niri_start": start, "now": start + 10})
+        self.assertEqual(list(f), ["waybar@DP-1:top", "waybar@DP-1:top#2", "wallpaper@DP-1:background",
+                                   "notifications@DP-1:overlay"])
+        self.assertEqual(f["waybar@DP-1:top"]["layer"], "top")
+        self.assertTrue(f["waybar@DP-1:top"]["at-startup"])
+        self.assertIsNone(rl.layer_facts(LAYERS)["waybar@DP-1:top"]["at-startup"])
+        self.assertEqual(rl.layer_facts(None), {})
+
+    def test_matching(self):
+        f = rl.layer_facts(LAYERS, {"niri_start": 0.0, "now": 300.0})
+        bar, wall = f["waybar@DP-1:top"], f["wallpaper@DP-1:background"]
+
+        def check(r, facts):
+            return rl.check_rule(r, facts, rl.LAYER)
+
+        self.assertEqual(check(rule(match(namespace="^way")), bar).status, rl.YES)
+        self.assertEqual(check(rule(match(namespace="^way")), wall).status, rl.NO)
+        self.assertEqual(check(rule(match(layer="top"), match(layer="overlay")), bar).status, rl.YES)
+        v = check(rule(match(layer="overlay")), bar)
+        self.assertEqual((v.status, v.reason), (rl.NO, "layer is top, not overlay"))
+        self.assertEqual(check(rule(match(at_startup=True)), bar).status, rl.NO)
+        self.assertEqual(check(rule(match(at_startup=True)), rl.layer_facts(LAYERS)["waybar@DP-1:top"]).status,
+                         rl.MAYBE)
+        self.assertEqual(check(rule(exclude(layer="background")), wall).reason, "excluded: layer is background")
+        self.assertEqual(check(rule(prop("opacity", 0.5)), wall).reason, "applies to every surface")
+
+    def test_summary_title_and_merge(self):
+        r = rule(match(namespace="^waybar$", layer="top"), prop("opacity", 0.9),
+                 {"name": "shadow", "args": [], "props": {}, "children": [prop("on"), prop("softness", 20)]})
+        self.assertEqual(rl.summary(r, rl.LAYER), "waybar top layer · opacity 0.9 · shadow on")
+        self.assertEqual(rl.title(r, rl.LAYER), "waybar")
+        self.assertEqual(rl.title(rule(prop("opacity", 1)), rl.LAYER), "All layer surfaces")
+        self.assertEqual(rl.summary(rule(prop("opacity", 1)), rl.LAYER), "all layer surfaces · opacity 1")
+        v = rl.Verdict(rl.YES, "")
+        self.assertEqual({m["path"] for m in rl.merged([r], [v], kind=rl.LAYER)},
+                         {"opacity", "shadow/state", "shadow/softness"})
+
+    def test_view_targets_and_why(self):
+        v = self.view
+        self.assertEqual([(t["title"], t["subtitle"]) for t in v.targets],
+                         [("notifications", "overlay · DP-1"), ("waybar", "top · DP-1"), ("waybar", "top · DP-1"),
+                          ("wallpaper", "background · DP-1")])
+        self.assertEqual(v.rules, [])
+        self.assertFalse(v.detail["has"])
+        self.assertFalse(v.canPick)
+        self.assertFalse(v.words["hasOpen"])
+        v.selectTarget("waybar@DP-1:top")
+        v.newRule("blur")
+        self.assertIn('// Blur behind waybar\nlayer-rule {\n    match namespace="^waybar$"\n'
+                      '    background-effect { blur true; }\n}', self.text())
+        self.assertNotIn("window-rule {\n    match namespace", self.text())
+        self.assertEqual([t["status"] for t in v.targets], ["no", "yes", "yes", "no"])
+        why = v.why
+        self.assertEqual((why["title"], why["subtitle"]), ("waybar", "top layer on DP-1"))
+        self.assertEqual([(x["label"], x["value"]) for x in why["values"]], [("Background blur", "true")])
+        d = v.detail
+        self.assertEqual(d["open"], [])
+        self.assertEqual([p["path"] for p in d["always"]], ["background-effect/blur"])
+        self.assertNotIn("open-floating", [a["value"] for a in d["addable"]])
+        self.assertEqual(self.backend.config.rules("window-rule")[0]["comment"],
+                         self.config.rules("window-rule")[0]["comment"])   # window rules untouched
+
+    def test_view_editing(self):
+        v = self.view
+        v.selectTarget("notifications@DP-1:overlay")
+        v.newRule("blank")
+        self.assertIn('// Rule for notifications\nlayer-rule {\n    match namespace="^notifications$"\n}',
+                      self.text())
+        v.addMatcher("match", 0, "layer")                # takes the selected surface's layer
+        self.assertIn('match namespace="^notifications$" layer="overlay"\n', self.text())
+        field = v.detail["directives"][0]["fields"][1]
+        self.assertEqual((field["kind"], [o["value"] for o in field["options"]]),
+                         ("enum", ["background", "bottom", "top", "overlay"]))
+        self.assertEqual(field["status"], "yes")
+        v.setMatcher("match", 0, "layer", "top")
+        self.assertIn('layer="top"\n', self.text())
+        v.addProp("shadow/state")
+        v.addProp("block-out-from")
+        v.setProp("geometry-corner-radius", "10")
+        text = self.text()
+        for line in ("shadow { on; }", 'block-out-from "screencast"', "geometry-corner-radius 10"):
+            self.assertIn(line, text)
+        v.addDirective("exclude")
+        self.assertIn('    exclude namespace="^notifications$"\n', self.text())
+        self.assertEqual(v.detail["error"], "")
+
+    def test_poll_refreshes_only_on_change(self):
+        v = self.view
+        seen = []
+        v.changed.connect(lambda: seen.append(1))
+        v._fetch = lambda: copy.deepcopy(LAYERS)
+        v.poll()
+        self.assertEqual(seen, [])
+        v._fetch = lambda: LAYERS[:1]
+        v.poll()
+        self.assertEqual(seen, [1])
+        self.assertEqual(len(v.targets), 1)
+
+    @unittest.skipUnless(HAVE_NIRI, "niri is not installed")
+    def test_niri_accepts_every_template_and_property(self):
+        for t in rl.LAYER.TEMPLATES:
+            self.model.add(rl.from_template(t, "waybar", rl.LAYER))
+        r = rule(match(namespace="x", layer="bottom", at_startup=False))
+        self.model.add(r)
+        i = len(self.config.rules("layer-rule")) - 1
+        for p in rl.LAYER.PROPS:
+            self.view.select(i)
+            self.view.addProp(p["path"])
+            self.assertEqual(self.view.detail["error"], "", p["path"])
+        ok, message = self.config.validate()
+        self.assertTrue(ok, message)
+        self.assertTrue(self.config.save()[0])
+        self.assertEqual(len(Config(self.main).rules("layer-rule")), len(rl.LAYER.TEMPLATES) + 1)
 
 
 if __name__ == "__main__":
