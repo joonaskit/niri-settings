@@ -69,7 +69,7 @@ Rectangle {
             visible: row.item.kind === "color"
             implicitWidth: 18; implicitHeight: 18
             radius: 4
-            color: visible ? (row.item.value || "transparent") : "transparent"
+            color: visible ? Theme.cssColor(row.item.value) : "transparent"
             border.width: 1
             border.color: Theme.lineStrong
             Accessible.ignored: true

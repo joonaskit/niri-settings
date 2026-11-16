@@ -15,6 +15,30 @@ ApplicationWindow {
 
     property string currentPage: "layout"
     property string currentTitle: "Layout"
+    // Where Config files should open: set by a setting's file:line link.
+    property string sourceFile: ""
+    property int sourceLine: 0
+    property int sourceSeq: 0
+
+    function go(id) {
+        var sections = backend.sections
+        for (var i = 0; i < sections.length; i++)
+            for (var j = 0; j < sections[i].pages.length; j++)
+                if (sections[i].pages[j].id === id) {
+                    currentPage = id
+                    currentTitle = sections[i].pages[j].title
+                }
+        search.text = ""
+    }
+    Connections {
+        target: backend
+        function onSourceRequested(file, line) {
+            window.sourceFile = file
+            window.sourceLine = line
+            window.sourceSeq += 1
+            window.go("files")
+        }
+    }
 
     Shortcut { sequence: "Ctrl+K"; onActivated: search.forceActiveFocus() }
     Shortcut { sequence: "Ctrl+S"; enabled: saveButton.enabled; onActivated: backend.save() }
@@ -44,6 +68,7 @@ ApplicationWindow {
                 }
                 TextField {
                     id: search
+                    objectName: "search"
                     Layout.fillWidth: true
                     Layout.maximumWidth: 520
                     implicitHeight: Theme.control
@@ -51,13 +76,12 @@ ApplicationWindow {
                     rightPadding: 12
                     font.pixelSize: Theme.body
                     color: Theme.text
-                    placeholderText: "Search layout settings…  (Ctrl+K)"
+                    placeholderText: "Search every setting…  (Ctrl+K)"
                     placeholderTextColor: Theme.muted
                     selectionColor: Theme.accent
                     selectedTextColor: Theme.accentInk
                     Accessible.name: "Search settings"
                     Keys.onEscapePressed: { text = ""; focus = false }
-                    onTextChanged: if (text) { window.currentPage = "layout"; window.currentTitle = "Layout" }
                     background: Rectangle {
                         radius: Theme.radius
                         color: Theme.raised
@@ -129,10 +153,7 @@ ApplicationWindow {
                                         Layout.fillWidth: true
                                         implicitHeight: Theme.control
                                         text: modelData.title
-                                        onClicked: {
-                                            window.currentPage = modelData.id
-                                            window.currentTitle = modelData.title
-                                        }
+                                        onClicked: window.go(modelData.id)
                                         Accessible.role: Accessible.PageTab
                                         Accessible.selected: current
                                         contentItem: Text {
@@ -165,14 +186,26 @@ ApplicationWindow {
             Loader {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                sourceComponent: window.currentPage === "layout" ? layoutPage
+                sourceComponent: search.text.trim() !== "" ? searchPage
+                               : window.currentPage === "layout" ? layoutPage
                                : window.currentPage === "files" ? filesPage
                                : window.currentPage === "displays" ? displaysPage
                                : window.currentPage === "binds" ? bindsPage
-                               : window.currentPage === "window-rules" ? rulesPage : placeholder
+                               : window.currentPage === "window-rules" ? rulesPage
+                               : backend.pages[window.currentPage] !== undefined ? settingsPage : placeholder
             }
-            Component { id: layoutPage; LayoutPage { filter: search.text } }
-            Component { id: filesPage; ConfigFilesPage {} }
+            Component { id: layoutPage; LayoutPage {} }
+            Component { id: searchPage; SearchPage { query: search.text; onOpenPage: id => window.go(id) } }
+            Component { id: settingsPage; SettingsPage { pageId: window.currentPage } }
+            Component {
+                id: filesPage
+                ConfigFilesPage {
+                    jumpFile: window.sourceFile
+                    jumpLine: window.sourceLine
+                    jumpSeq: window.sourceSeq
+                    onOpenPage: id => window.go(id)
+                }
+            }
             Component { id: displaysPage; DisplaysPage {} }
             Component { id: bindsPage; KeyBindingsPage {} }
             Component { id: rulesPage; WindowRulesPage {} }

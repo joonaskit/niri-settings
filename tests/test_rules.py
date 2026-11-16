@@ -335,7 +335,7 @@ class Matching(unittest.TestCase):
         ]
         verdicts = [rl.check_rule(r, self.facts[2]) for r in rules]
         values = {m["path"]: m for m in rl.merged(rules, verdicts)}
-        self.assertEqual(values["opacity"]["value"], "1")
+        self.assertEqual(values["opacity"]["value"], "1.0")
         self.assertEqual(values["opacity"]["rule"], 1)
         self.assertEqual(values["opacity"]["earlier"], [0])
         self.assertEqual(values["focus-ring/state"]["value"], "on")

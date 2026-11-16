@@ -20,7 +20,7 @@ Item {
         Text {
             font.pixelSize: Theme.secondary
             color: Theme.muted
-            text: "This page is not built yet. Edit these settings in the config file for now."
+            text: "This page is not built yet. Edit these settings in Config files for now."
         }
     }
 }

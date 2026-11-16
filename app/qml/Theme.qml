@@ -52,6 +52,15 @@ QtObject {
     readonly property int radiusCard: 12
     readonly property int sidebar: 220
 
+    // niri writes colors as CSS (#rgba, #rrggbbaa); Qt reads alpha first.
+    function cssColor(c) {
+        if (typeof c !== "string" || c[0] !== "#") return c || "transparent"
+        var h = c.slice(1)
+        if (h.length === 4) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2] + h[3] + h[3]
+        if (h.length === 8) return "#" + h.slice(6) + h.slice(0, 6)
+        return c
+    }
+
     // Motion: only for things that move or resize
     readonly property int motion: 200
 }
