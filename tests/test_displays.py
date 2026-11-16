@@ -74,7 +74,14 @@ class Displays(unittest.TestCase):
         self.main = os.path.join(self.tmp, "config.kdl")
         self.cfg = Config(self.main)
         self.niri = FakeNiri(LIVE)
-        self.model = DisplayModel(lambda: self.cfg, self.niri.outputs, self.niri.run)
+        # The guard process runs the revert commands itself, so give it a niri
+        # that only writes down what it was asked to do.
+        self.guard_log = os.path.join(self.home, "guard.log")
+        fake = os.path.join(self.home, "niri")
+        with open(fake, "w", encoding="utf-8") as fh:
+            fh.write(f"#!/bin/sh\necho \"$*\" >> '{self.guard_log}'\n")
+        os.chmod(fake, 0o755)
+        self.model = DisplayModel(lambda: self.cfg, self.niri.outputs, self.niri.run, niri_bin=fake)
         self.model.refresh()
 
     def tearDown(self):
@@ -90,6 +97,12 @@ class Displays(unittest.TestCase):
     def read(self):
         with open(self.main, encoding="utf-8") as fh:
             return fh.read()
+
+    def guard_commands(self) -> list[str]:
+        if not os.path.exists(self.guard_log):
+            return []
+        with open(self.guard_log, encoding="utf-8") as fh:
+            return fh.read().splitlines()
 
     def test_draft_is_config_then_live(self):
         d = self.model.draft("DP-1")            # corpus sets only `scale 1.5` for DP-1
@@ -137,14 +150,17 @@ class Displays(unittest.TestCase):
         self.model.refresh()
         self.assertEqual(self.model.untried(), [])              # niri now shows the draft
         self.assertEqual(self.read(), before)                   # config untouched
+        self.assertEqual(self.guard_commands(), [])
         self.model.end_trial(keep=False)
         self.assertFalse(self.model.trial_running)
         self.assertEqual(self.read(), before)
+        self.assertEqual(self.guard_commands(), ["msg output eDP-1 position set 2560 0", "msg output DP-1 scale 1.5"])
 
     def test_keep_leaves_drafts_for_save(self):
         self.model.set_scale("DP-1", 2)
         self.assertTrue(self.model.start_trial(seconds=30))
         self.model.end_trial(keep=True)
+        self.assertEqual(self.guard_commands(), [])            # kept: nothing reverted
         self.model.refresh()
         self.assertEqual(self.model.untried(), [])
         self.assertEqual(self.cfg.pending, {"output[DP-1]/scale": 2})
