@@ -8,7 +8,7 @@ import time
 from PySide6.QtCore import (Property, QFileSystemWatcher, QObject, QTimer, Signal, Slot)
 
 from . import ipc, niri_core
-from .config import MANAGED, Config, ReadOnlyError
+from .config import MANAGED, RULES, Config, ReadOnlyError
 from .schema import layout as layout_schema
 
 # (group, [(page id, title)]) in sidebar order, from the concept screens.
@@ -31,6 +31,8 @@ def _show(value) -> str:
     """A config value as the user would read it in the file."""
     if value is None:
         return "not set"
+    if isinstance(value, list):
+        return f"{len(value)} rule{'s' if len(value) != 1 else ''}"
     if value is True:
         return "on"
     if isinstance(value, dict):
@@ -186,7 +188,7 @@ class Backend(QObject):
 
     @Property(int, notify=changed)
     def pendingCount(self):
-        return len(self.config.pending)
+        return self.config.pending_count()
 
     @Property(bool, notify=changed)
     def valid(self):
@@ -225,7 +227,7 @@ class Backend(QObject):
 
     @Property("QVariantList", notify=changed)
     def conflicts(self):
-        return [{"path": p.replace("/", " › "), "mine": _show(c["mine"]), "disk": _show(c["disk"])}
+        return [{"path": p.replace("/", " › ") if p not in RULES else p + "s", "mine": _show(c["mine"]), "disk": _show(c["disk"])}
                 for p, c in self.config.conflicts.items()]
 
     @Slot(bool)

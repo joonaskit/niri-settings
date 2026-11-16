@@ -19,6 +19,9 @@ import time
 
 from . import niri_core
 
+# Repeated top-level sections tracked as one ordered list each: removing or
+# moving one rule shifts the index of every rule after it.
+RULES = ("window-rule", "layer-rule")
 PREVIEW_NAME = "niri-gui-preview.kdl"
 MANAGED_NAME = "niri-gui.kdl"
 IN_PLACE, MANAGED = "in-place", "managed"
@@ -118,13 +121,36 @@ class Config:
         value = self.tree.get(path)
         return default if value is None else value
 
+    def _value(self, path: str):
+        """What a tracked path holds now: a value, or a list of rules."""
+        if path in RULES:
+            return self.rules(path)
+        return self.tree.get(path)
+
+    def rules(self, name: str) -> list[dict]:
+        """Every rule of one kind, in niri's order: {args, props, children, comment}."""
+        return [dict(n["value"], comment=n["comment"]) for n in self.tree.top_nodes(name)]
+
     def source(self, path: str) -> dict | None:
         return self.tree.source_of(path)
 
     @property
     def pending(self) -> dict[str, object]:
         """Unsaved changes: path -> new value (None means removed)."""
-        return {p: self.tree.get(p) for p in self._baseline}
+        return {p: self._value(p) for p in self._baseline}
+
+    def pending_count(self) -> int:
+        """Unsaved changes, counting each changed rule once."""
+        count = 0
+        for path, old in self._baseline.items():
+            if path not in RULES:
+                count += 1
+                continue
+            new = self._value(path)
+            for tag, i1, i2, j1, j2 in _rule_ops(old or [], new):
+                if tag != "equal":
+                    count += max(i2 - i1, j2 - j1)
+        return count
 
     @property
     def preview_file(self) -> str:
@@ -162,11 +188,11 @@ class Config:
 
     def _track(self, path: str):
         if path not in self._baseline:
-            self._baseline[path] = self.tree.get(path)
+            self._baseline[path] = self._value(path)
 
     def _settle(self):
         """Forget edits that ended up back at their saved value."""
-        for path in [p for p, old in self._baseline.items() if self.tree.get(p) == old]:
+        for path in [p for p, old in self._baseline.items() if self._value(p) == old]:
             del self._baseline[path]
         if not self._baseline:
             # Nothing pending: drop any leftover formatting differences too.
@@ -255,10 +281,89 @@ class Config:
         self._settle()
 
     def _apply(self, path: str, value):
-        if value is None:
+        if path in RULES:
+            self.set_rules(path, value or [])
+        elif value is None:
             self.remove(path)
         else:
             self.set(path, value)
+
+    # -- rules
+
+    def set_rules(self, name: str, new: list[dict]):
+        """Make the rules of one kind equal `new`, editing as little text as possible.
+
+        Rules keep their file. New rules go next to their neighbours in the
+        list; in managed mode only after your own rules, in niri-gui.kdl.
+        Raises ReadOnlyError, changing nothing, if managed mode forbids it.
+        """
+        self._track(name)
+        try:
+            self._write_rules(name, new)
+        finally:
+            self._moving = {}
+            self._settle()
+
+    def _writable(self, file: str) -> bool:
+        return self.write_mode != MANAGED or file == self.managed_file
+
+    def _write_rules(self, name: str, new: list[dict]):
+        old = self.rules(name)
+        nodes = self.tree.top_nodes(name)
+        files = [n["file"] for n in nodes]
+        key = lambda r: json.dumps(r, sort_keys=True, default=str)
+        # Text of rules that are removed here, so a rule that only moves is
+        # written back exactly as it was.
+        self._moving = {}
+        label = name.replace("-", " ")
+        plan = []
+        for tag, i1, i2, j1, j2 in _rule_ops(old, new):
+            if tag == "equal":
+                continue
+            paired = min(i2 - i1, j2 - j1)
+            plan += [("set", i1 + k, new[j1 + k]) for k in range(paired)]
+            plan += [("remove", k, None) for k in range(i1 + paired, i2)]
+            for k in range(i1 + paired, i2):
+                self._moving.setdefault(key(old[k]), []).append(nodes[k]["full_text"])
+            if j2 - j1 > paired:
+                plan.append(("insert", i1 + paired, new[j1 + paired:j2]))
+        for op, i, _ in plan:
+            if op in ("set", "remove") and not self._writable(files[i]):
+                raise ReadOnlyError(
+                    f"This {label} is in {os.path.basename(files[i])}, which managed mode keeps "
+                    "read-only. Switch to in-place mode to change or remove it.")
+            if op == "insert" and self.write_mode == MANAGED and i < len(old) \
+                    and not (i and self._writable(files[i - 1])) and not self._writable(files[i]):
+                raise ReadOnlyError(
+                    f"Managed mode can add a {label} only after your own ones. "
+                    "Switch to in-place mode to put it in between.")
+        # Highest position first, so lower indexes stay valid. An insert at
+        # position i goes after everything at i and above is done.
+        plan.sort(key=lambda p: p[1] - (0.5 if p[0] == "insert" else 0), reverse=True)
+        for op, i, value in plan:
+            if op == "set":
+                body = {k: v for k, v in value.items() if k != "comment"}
+                self.tree.replace_top(name, i, body, value.get("comment", ""))
+            elif op == "remove":
+                self.tree.remove_top(name, i)
+            else:
+                for k, rule in enumerate(value):
+                    self._insert_rule(name, i + k, rule)
+
+    def _insert_rule(self, name: str, i: int, rule: dict):
+        """Put a rule at position i of the current list."""
+        nodes = self.tree.top_nodes(name)
+        body = {k: v for k, v in rule.items() if k != "comment"}
+        comment = rule.get("comment", "")
+        moved = getattr(self, "_moving", {}).get(json.dumps(rule, sort_keys=True, default=str))
+        text = moved.pop(0) if moved else None
+        if i and self._writable(nodes[i - 1]["file"]):
+            self.tree.insert_top(name, body, nodes[i - 1]["file"], i - 1, True, comment, text)
+        elif i < len(nodes) and self._writable(nodes[i]["file"]):
+            self.tree.insert_top(name, body, nodes[i]["file"], i, False, comment, text)
+        else:
+            target = self.managed_file if self.write_mode == MANAGED else self.main
+            self.tree.insert_top(name, body, target, comment=comment, text=text)
 
     def revert(self):
         self._baseline.clear()
@@ -299,7 +404,7 @@ class Config:
         if self.write_mode == MANAGED and not self.managed_enabled:
             self.write_mode = IN_PLACE
         for path, value in mine.items():
-            disk = self.tree.get(path)
+            disk = self._value(path)
             if disk == value:
                 continue
             if disk == base[path]:
@@ -626,6 +731,10 @@ class Config:
         root: dict = {}
         for path, value in self.pending.items():
             parts = path.split("/")
+            if parts[0] in RULES:
+                # Rules apply on save: an overlay can add a rule but not
+                # change or remove one, so it cannot show an edit faithfully.
+                continue
             if parts[0].startswith("output[") or parts[0] == "binds":
                 # Display changes are never previewed through the overlay: they
                 # can lock the user out and go through a timed trial instead.
@@ -697,6 +806,12 @@ class Config:
         if os.path.exists(self.preview_file) and os.path.getsize(self.preview_file):
             _write_atomic(self.preview_file, "")
         self._preview_written = ""
+
+
+def _rule_ops(old: list[dict], new: list[dict]):
+    key = lambda r: json.dumps(r, sort_keys=True, default=str)
+    return difflib.SequenceMatcher(None, [key(r) for r in old], [key(r) for r in new],
+                                   autojunk=False).get_opcodes()
 
 
 def _clean_error(stderr: str, tmp: str) -> str:

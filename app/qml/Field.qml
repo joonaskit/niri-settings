@@ -14,6 +14,8 @@ TextField {
     selectionColor: Theme.accent
     selectedTextColor: Theme.accentInk
     selectByMouse: true
+    // Show the start of a long value, not its end, until the user edits it.
+    onTextChanged: if (!activeFocus) cursorPosition = 0
     background: Rectangle {
         radius: Theme.radius
         color: Theme.raised

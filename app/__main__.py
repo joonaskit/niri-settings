@@ -11,6 +11,7 @@ from PySide6.QtQuickControls2 import QQuickStyle
 
 from .binds_view import BindsView
 from .displays_view import DisplaysView
+from .rules_view import RulesView
 from .viewmodel import Backend
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,7 @@ def main() -> int:
     backend = Backend(args.config, live=not args.offline)
     displays = DisplaysView(backend)
     binds = BindsView(backend)
+    rules = RulesView(backend)
     app.aboutToQuit.connect(displays.shutdown)
     app.aboutToQuit.connect(backend.shutdown)
 
@@ -42,6 +44,7 @@ def main() -> int:
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("displays", displays)
     engine.rootContext().setContextProperty("binds", binds)
+    engine.rootContext().setContextProperty("rules", rules)
     engine.load(os.path.join(HERE, "qml", "Main.qml"))
     if not engine.rootObjects():
         return 1

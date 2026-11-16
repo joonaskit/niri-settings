@@ -11,11 +11,14 @@ It does no disk writes; that is the caller's job (see config.py).
 
 from __future__ import annotations
 
+import difflib
+import json
 import os
 import re
 from dataclasses import dataclass, field
 
-__all__ = ["KdlError", "Tree", "load_tree", "load_string", "format_node", "format_value"]
+__all__ = ["KdlError", "Raw", "Tree", "load_tree", "load_string", "format_node", "format_value",
+           "format_block"]
 
 # Sections whose contents niri treats as one combined value: a later
 # occurrence replaces the earlier one instead of merging into it.
@@ -29,6 +32,8 @@ NON_MERGING = {
 # Nodes that may repeat. `list()` addresses these by argument or by index.
 # Sections whose children are read and written as whole nodes, block included.
 WHOLE = {"binds"}
+# Top-level nodes read and written whole, nested blocks included (rules).
+WHOLE_TOP = {"window-rule", "layer-rule"}
 KEYED = {"output", "workspace"}
 REPEATED = {
     "window-rule", "layer-rule", "spawn-at-startup", "spawn-sh-at-startup",
@@ -38,6 +43,10 @@ REPEATED = {
 _NON_IDENT = set('\\/(){}<>;[]=,"')
 _NEWLINES = "\n\r\x0c\x85  "
 _SPACES = " \t﻿ 　"
+
+
+class Raw(str):
+    """A string written as a raw KDL string when it has backslashes (regexes)."""
 
 
 class KdlError(Exception):
@@ -335,6 +344,10 @@ def format_value(value: object) -> str:
             return str(int(value))
         return repr(round(value, 6))
     text = str(value)
+    if isinstance(value, Raw) and ("\\" in text or '"' in text) and '"#' not in text \
+            and "\n" not in text and "\r" not in text:
+        return f'r#"{text}"#'
+
     escapes = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
     return '"' + "".join(escapes.get(c, c) for c in text) + '"'
 
@@ -350,13 +363,50 @@ def _format_entries(value: object) -> str:
     return format_value(value)
 
 
+def _format_head(c: dict) -> str:
+    tail = _format_entries({"args": c.get("args", []), "props": c.get("props", {})})
+    return _format_name(c["name"]) + (" " + tail if tail else "")
+
+
+def _format_child(c: dict) -> str:
+    text = _format_head(c)
+    if "children" in c:
+        text += " " + _format_children(c["children"])
+    return text
+
+
 def _format_children(children: list[dict]) -> str:
     """A one-line block for the child nodes of a whole-node value."""
-    parts = []
-    for c in children:
-        tail = _format_entries({"args": c.get("args", []), "props": c.get("props", {})})
-        parts.append(_format_name(c["name"]) + (" " + tail if tail else "") + ";")
+    parts = [_format_child(c) + ";" for c in children]
     return "{ " + " ".join(parts) + " }" if parts else "{ }"
+
+
+def _child_lines(c: dict, indent: str) -> list[str]:
+    """One child node as lines; a block of one plain child stays on one line."""
+    head = _format_head(c)
+    kids = c.get("children")
+    if kids is None:
+        return [indent + head]
+    if not kids:
+        return [indent + head + " {}"]
+    if len(kids) == 1 and "children" not in kids[0]:
+        return [indent + head + " { " + _format_child(kids[0]) + "; }"]
+    lines = [indent + head + " {"]
+    for k in kids:
+        lines += _child_lines(k, indent + "    ")
+    return lines + [indent + "}"]
+
+
+def format_block(name: str, value: dict, indent: str = "") -> str:
+    """A whole node written over several lines, the way rules usually are."""
+    head = _format_head({"name": name, "args": value.get("args", []), "props": value.get("props", {})})
+    kids = value.get("children") or []
+    if not kids:
+        return indent + head + " {}"
+    lines = [indent + head + " {"]
+    for k in kids:
+        lines += _child_lines(k, indent + "    ")
+    return "\n".join(lines + [indent + "}"])
 
 
 def _format_name(name: str) -> str:
@@ -437,16 +487,33 @@ def _node_value(node: Node) -> object:
     return {"args": args, "props": props}
 
 
+def _child_value(node: Node) -> dict:
+    """A child node as {name, args, props}, plus `children` when it has a block."""
+    value = {"name": node.name, "args": node.args, "props": node.props}
+    if node.children is not None:
+        value["children"] = [_child_value(c) for c in node.children]
+    return value
+
+
 def _whole_value(node: Node) -> dict:
     """A node together with its children, for sections listed in WHOLE."""
     return {"args": node.args, "props": node.props,
-            "children": [{"name": c.name, "args": c.args, "props": c.props}
-                         for c in (node.children or [])]}
+            "children": [_child_value(c) for c in (node.children or [])]}
 
 
 def _is_whole(path: str) -> bool:
     parent, _, name = path.rpartition("/")
+    if not parent and name:
+        return _Segment.parse(name).name in WHOLE_TOP
     return bool(name) and parent in WHOLE
+
+
+def _key(value) -> str:
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _entry_text(name: str | None, value) -> str:
+    return format_value(value) if name is None else f"{_format_name(name)}={format_value(value)}"
 
 
 # --------------------------------------------------------------------------
@@ -727,17 +794,7 @@ class Tree:
 
     def _set_existing(self, f: _File, node: Node, value):
         if isinstance(value, dict) and "children" in value:
-            # Later text first, so the earlier offsets stay valid.
-            if _whole_value(node)["children"] != value["children"]:
-                block = _format_children(value["children"])
-                if node.children is None:
-                    self._splice(f, node.end, node.end, " " + block)
-                else:
-                    self._splice(f, node.block_start, node.block_end + 1, block)
-            if (node.args, node.props) != (value.get("args", []), value.get("props", {})):
-                entries_end = node.entries[-1].end if node.entries else node.name_end
-                tail = _format_entries(value)
-                self._splice(f, node.name_end, entries_end, " " + tail if tail else "")
+            self._replace_node(f, node, value)
             return
         positional = [e for e in node.entries if e.name is None]
         scalar = not isinstance(value, dict) and value is not True
@@ -748,6 +805,225 @@ class Tree:
         entries_end = node.entries[-1].end if node.entries else node.name_end
         tail = _format_entries(value)
         self._splice(f, node.name_end, entries_end, " " + tail if tail else "")
+
+    # -- whole-node edits: splice only what changed, later text first so the
+    # offsets of everything before it stay valid.
+
+    def _replace_node(self, f: _File, node: Node, value: dict):
+        """Make one node equal `value` ({args, props, children?})."""
+        kids = value.get("children")
+        t = f.text
+        if kids is None:
+            if node.children is not None:
+                start = node.entries[-1].end if node.entries else node.name_end
+                self._splice(f, start, node.block_end + 1, "")
+        elif node.children is None:
+            self._splice(f, node.end, node.end, " " + _format_children(kids))
+        elif [_child_value(c) for c in node.children] != kids:
+            if "\n" in t[node.block_start:node.block_end]:
+                self._update_block(f, node, kids)
+            elif node.children and kids:
+                self._update_block(f, node, kids, oneline=True)
+            else:
+                self._splice(f, node.block_start, node.block_end + 1, _format_children(kids))
+        self._update_entries(f, node, value.get("args", []), value.get("props", {}))
+
+    def _update_entries(self, f: _File, node: Node, args: list, props: dict):
+        old = [(e.name, e.value) for e in node.entries]
+        new = [(None, a) for a in args] + list(props.items())
+        if old == new:
+            return
+        ops = difflib.SequenceMatcher(None, [_key(e) for e in old], [_key(e) for e in new],
+                                      autojunk=False).get_opcodes()
+        for tag, i1, i2, j1, j2 in reversed(ops):
+            if tag == "equal":
+                continue
+            olds, news = node.entries[i1:i2], new[j1:j2]
+            paired = min(len(olds), len(news))
+            if len(news) > paired:
+                at = olds[paired - 1].end if paired else (node.entries[i1 - 1].end if i1 else node.name_end)
+                self._splice(f, at, at, "".join(" " + _entry_text(*e) for e in news[paired:]))
+            for e in reversed(olds[paired:]):
+                k = node.entries.index(e)
+                start = node.entries[k - 1].end if k else node.name_end
+                self._splice(f, start, e.end, "")
+            for e, (name, value) in reversed(list(zip(olds[:paired], news[:paired]))):
+                self._splice(f, e.start, e.end, _entry_text(name, value))
+
+    def _update_block(self, f: _File, node: Node, kids: list[dict], oneline: bool = False):
+        """Edit a block child by child, keeping comments, layout and the way
+        values are written (raw strings stay raw)."""
+        olds = node.children
+        t = f.text
+        if olds:
+            indent = self._indent_of(t, olds[0].start)
+        else:
+            indent = self._indent_of(t, node.start) + "    "
+        ops = difflib.SequenceMatcher(None, [_key(_child_value(c)) for c in olds], [_key(k) for k in kids],
+                                      autojunk=False).get_opcodes()
+        for tag, i1, i2, j1, j2 in reversed(ops):
+            if tag == "equal":
+                continue
+            old, new = olds[i1:i2], kids[j1:j2]
+            paired = min(len(old), len(new))
+            if len(new) > paired:
+                text = "\n".join(line for k in new[paired:] for line in _child_lines(k, indent))
+                after = old[paired - 1] if paired else (olds[i1 - 1] if i1 else None)
+                if oneline:
+                    text = "; ".join(_format_child(k) for k in new[paired:])
+                    if after is not None:
+                        self._splice(f, after.end, after.end, "; " + text)
+                    else:
+                        self._splice(f, olds[0].start, olds[0].start, text + "; ")
+                elif after is not None:
+                    at = f.text.find("\n", after.end)
+                    at = len(f.text) if at < 0 else at
+                    self._splice(f, at, at, "\n" + text)
+                elif olds:
+                    at = f.text.rfind("\n", 0, olds[0].start) + 1
+                    self._splice(f, at, at, text + "\n")
+                else:
+                    at = f.text.find("\n", node.block_start)
+                    self._splice(f, at, at, "\n" + text)
+            for c in reversed(old[paired:]):
+                self._remove_node(f, c)
+            for c, k in reversed(list(zip(old[:paired], new[:paired]))):
+                if c.name == k["name"]:
+                    self._replace_node(f, c, k)
+                elif oneline:
+                    self._splice(f, c.start, c.end, _format_child(k))
+                else:
+                    lines = _child_lines(k, self._indent_of(f.text, c.start))
+                    self._splice(f, c.start, c.end, "\n".join(lines).lstrip(" \t"))
+
+    # -- top-level nodes read and written whole (window-rule, layer-rule)
+
+    def _tops(self, name: str) -> list[tuple[_File, Node]]:
+        return [(f, n) for f, n in self._top() if n.name == name]
+
+    @staticmethod
+    def _comment_lines(f: _File, node: Node) -> list[tuple[int, int]]:
+        """(start, end) of the `//` lines directly above a node, top to bottom."""
+        t = f.text
+        line_start = t.rfind("\n", 0, node.start) + 1
+        if t[line_start:node.start].strip():
+            return []
+        out, end = [], line_start
+        while end > 0:
+            start = t.rfind("\n", 0, end - 1) + 1
+            if not t[start:end - 1].strip().startswith("//"):
+                break
+            out.insert(0, (start, end))
+            end = start
+        return out
+
+    def _comment_of(self, f: _File, node: Node) -> str:
+        lines = self._comment_lines(f, node)
+        if not lines:
+            return ""
+        start, end = lines[0]
+        return f.text[start:end].strip()[2:].strip()
+
+    def top_nodes(self, name: str) -> list[dict]:
+        """Every top-level node of this name, from every file, in niri's order.
+
+        `comment` is the first line of the `//` comment right above the node,
+        which serves as the node's name in the app.
+        """
+        out = []
+        for f, node in self._tops(name):
+            lines = self._comment_lines(f, node)
+            out.append({"file": f.path, "line": f.text.count("\n", 0, node.start) + 1,
+                        "end_line": f.text.count("\n", 0, max(node.start, node.end - 1)) + 1,
+                        "value": _whole_value(node), "comment": self._comment_of(f, node),
+                        "text": f.text[node.start:node.end],
+                        "full_text": f.text[lines[0][0] if lines else node.start:node.end]})
+        return out
+
+    def replace_top(self, name: str, index: int, value: dict, comment: str | None = None):
+        """Change the index-th node of this name, and its name comment."""
+        f, node = self._tops(name)[index]
+        self._replace_node(f, node, value)
+        if comment is None:
+            return
+        comment = " ".join(comment.split())
+        f, node = self._tops(name)[index]
+        if self._comment_of(f, node) == comment:
+            return
+        lines = self._comment_lines(f, node)
+        if lines:
+            start, end = lines[0]
+            if comment:
+                indent = re.match(r"[ \t]*", f.text[start:end]).group(0)
+                self._splice(f, start, end, f"{indent}// {comment}\n")
+            else:
+                self._splice(f, start, end, "")
+        elif comment:
+            at = f.text.rfind("\n", 0, node.start) + 1
+            self._splice(f, at, at, f"{self._indent_of(f.text, node.start)}// {comment}\n")
+
+    def insert_top(self, name: str, value: dict, file: str, anchor: int | None = None,
+                   after: bool = True, comment: str = "", text: str | None = None):
+        """Add a node of this name to one file, next to the anchor-th one.
+
+        Without an anchor it goes at the end of the file, above any includes
+        that close it. `text`, when given, is written instead of formatting
+        the value: a moved node keeps its comments and spelling.
+        """
+        f = self._file(file)
+        comment = " ".join(comment.split())
+        if text is None:
+            text = (f"// {comment}\n" if comment else "") + format_block(name, value)
+        if anchor is not None:
+            af, node = self._tops(name)[anchor]
+            if af is not f:
+                raise ValueError("the anchor is in another file")
+            if after:
+                at = f.text.find("\n", node.end)
+                if at < 0:
+                    self._splice(f, len(f.text), len(f.text), "\n\n" + text + "\n")
+                else:
+                    self._splice(f, at, at, "\n\n" + text)
+            else:
+                lines = self._comment_lines(f, node)
+                at = lines[0][0] if lines else f.text.rfind("\n", 0, node.start) + 1
+                self._splice(f, at, at, text + "\n\n")
+            return
+        t = f.text
+        trailing = None
+        for node in reversed(f.nodes):
+            if node.name != "include":
+                break
+            trailing = node
+        if trailing is not None and not t[t.rfind("\n", 0, trailing.start) + 1:trailing.start]:
+            lines = self._comment_lines(f, trailing)
+            at = lines[0][0] if lines else trailing.start
+            self._splice(f, at, at, text + "\n\n")
+            return
+        lead = "" if not t else ("\n" if t.endswith("\n") else "\n\n")
+        self._splice(f, len(t), len(t), lead + text + "\n")
+
+    def remove_top(self, name: str, index: int):
+        """Delete the index-th node of this name together with its name comment."""
+        f, node = self._tops(name)[index]
+        lines = self._comment_lines(f, node)
+        at = lines[0][0] if lines else f.text.rfind("\n", 0, node.start) + 1
+        self._remove_node(f, node)
+        if lines:
+            self._splice(f, lines[0][0], lines[-1][1], "")
+        # Leave one blank line where the node was, not two.
+        t = f.text
+        start = at
+        while start > 0 and t[start - 1] == "\n":
+            start -= 1
+        end = at
+        while end < len(t) and t[end] == "\n":
+            end += 1
+        if end == len(t):
+            if t[start:end] != ("\n" if start else ""):
+                self._splice(f, start, end, "\n" if start else "")
+        elif end - start > 2:
+            self._splice(f, start, end, "\n\n" if start else "")
 
     def _insert(self, f: _File, parent: Node | None, segs: list[str], value,
                 raw: tuple[str, str] | None = None):
@@ -813,6 +1089,9 @@ class Tree:
         node = self._find_in_file(f, path)
         if node is None:
             return
+        self._remove_node(f, node)
+
+    def _remove_node(self, f: _File, node: Node):
         t = f.text
         start, end = node.start, node.end
         line_start = t.rfind("\n", 0, start) + 1
