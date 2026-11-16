@@ -5,7 +5,8 @@ the AppStream file and the Wayland app-id the window gets (for niri window rules
 
 ## Build the RPM locally
 
-Needs `rpm-build`, `git` and the build dependencies (`dnf builddep packaging/niri-settings.spec`).
+Needs `rpm-build`, `git`, `python3-setuptools` and the build dependencies
+(`dnf builddep packaging/niri-settings.spec`).
 
 ```
 make -f .copr/Makefile srpm            # source RPM of HEAD into dist/
@@ -17,7 +18,7 @@ Without those tools on the host, build in a container:
 
 ```
 podman run --rm -v "$PWD":/src:Z -w /src registry.fedoraproject.org/fedora:44 bash -c '
-  dnf -y install git rpm-build make python3-devel pyproject-rpm-macros "dnf-command(builddep)" &&
+  dnf -y install git rpm-build make python3-devel python3-setuptools pyproject-rpm-macros "dnf-command(builddep)" &&
   make -f .copr/Makefile srpm &&
   dnf -y builddep dist/*.src.rpm &&
   rpmbuild --rebuild dist/*.src.rpm --define "_rpmdir /src/dist"'
