@@ -18,10 +18,12 @@ import tempfile
 import time
 
 from . import niri_core
+from . import rules as rl
 
 # Repeated top-level sections tracked as one ordered list each: removing or
 # moving one entry shifts the index of every entry after it.
 RULES = ("window-rule", "layer-rule", "spawn-at-startup", "spawn-sh-at-startup")
+_RULE_KINDS = {"window-rule": rl.WINDOW, "layer-rule": rl.LAYER}   # previewed by adding rules
 # A raw edit of a whole file in the source editor is tracked as "file:<path>".
 FILE = "file:"
 PREVIEW_NAME = "niri-gui-preview.kdl"
@@ -836,14 +838,53 @@ class Config:
 
     # -- live preview
 
+    def rule_preview(self, name: str) -> tuple[list[dict] | None, str]:
+        """Rules the overlay adds to show unsaved edits of window or layer rules.
+
+        (rules, "") when the edits can be shown, ([], "") when there are none,
+        and (None, why) when they show only after save: an overlay can add
+        rules but not change or remove one (see rules.overlay).
+        """
+        kind = _RULE_KINDS.get(name)
+        if kind is None or name not in self._baseline:
+            return ([], "") if kind is not None else (None, "applies on save")
+        extra, why = rl.overlay(self._baseline[name] or [], self.rules(name), kind)
+        if extra and self._after_preview(name):
+            return None, f"a {name} comes after the preview include in {os.path.basename(self.main)}"
+        return extra, why
+
+    def _after_preview(self, name: str) -> bool:
+        """Whether niri reads an enabled rule of this kind after the preview file,
+        so a rule added there would not be the last word."""
+        files = self.tree.files()
+        if self.preview_file not in files:
+            return False
+        order = files.index(self.preview_file)
+        include = re.search(r'^\s*include\b[^\n]*"%s"' % re.escape(PREVIEW_NAME),
+                            self.tree.render(self.main), re.MULTILINE)
+        line = self.tree.render(self.main).count("\n", 0, include.start()) + 1 if include else 0
+        for n in self.tree.top_nodes(name):
+            if n["disabled"]:
+                continue
+            if n["file"] == self.main:
+                if include and n["line"] > line:
+                    return True
+            elif n["file"] in files and files.index(n["file"]) > order:
+                return True
+        return False
+
     def preview_text(self) -> str:
         """The pending changes as a small KDL overlay that niri merges last."""
         root: dict = {}
+        added: list[str] = []
         for path, value in self.pending.items():
             parts = path.split("/")
+            if parts[0] in _RULE_KINDS:
+                extra, _ = self.rule_preview(parts[0])
+                added += [niri_core.format_block(parts[0], r) for r in extra or []]
+                continue
             if parts[0] in RULES or path.startswith(FILE):
-                # Rules apply on save: an overlay can add a rule but not
-                # change or remove one, so it cannot show an edit faithfully.
+                # Startup commands apply on save, and file text has no overlay.
                 continue
             if parts[0].startswith("output[") or parts[0] == "binds":
                 # Display changes are never previewed through the overlay: they
@@ -892,10 +933,10 @@ class Config:
                               for i, line in enumerate(val.split("\n"))]
             return lines
 
-        if not root:
+        if not root and not added:
             return ""
         head = "// Unsaved changes from niri settings. This file is emptied on save or revert.\n"
-        return head + "\n".join(emit(root, "")) + "\n"
+        return head + "\n".join(emit(root, "") + added) + "\n"
 
     def write_preview(self) -> tuple[bool, str]:
         """Show unsaved changes on the running niri. Does nothing unless enabled."""

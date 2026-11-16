@@ -23,6 +23,8 @@ rule in its file and only rewrites the lines that changed.
 from __future__ import annotations
 
 import copy
+import difflib
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -646,6 +648,86 @@ def from_template(template: dict, app_id: str | None, kind=WINDOW) -> dict:
         rule["comment"] = template["title"].replace("this app", app_id).replace("this surface", app_id) \
             .replace("App", app_id).replace("Surface", app_id)
     return rule
+
+
+# --------------------------------------------------------------------------
+# Live preview: unsaved rule edits as rules added after all others
+
+
+def _key(value) -> str:
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _body(rule: dict) -> dict:
+    return {k: v for k, v in rule.items() if k not in ("comment", "disabled")}
+
+
+def _matchers(rule: dict) -> list[dict]:
+    return [c for c in rule.get("children", []) if c["name"] in ("match", "exclude")]
+
+
+def _leaf_map(rule: dict, kind) -> dict[str, dict]:
+    """path -> node of what an enabled rule sets; nothing for a rule that is off."""
+    if rule.get("disabled"):
+        return {}
+    return {path: node for path, node in leaves(rule.get("children", []), kind=kind)}
+
+
+def overlay(old: list[dict], new: list[dict], kind=WINDOW) -> tuple[list[dict] | None, str]:
+    """Rules that, added after the saved ones, make niri behave as `new` does.
+
+    niri can be shown unsaved rule edits only by adding rules at the end, so
+    this works when every edit adds: a new rule, a rule turned on, or new or
+    changed properties on a rule whose match lines stay the same. Each added
+    property must also be the last word: no later rule may set it, or the
+    added rule would win where that later rule should.
+
+    Returns (rules to add, "") or (None, why the edits cannot be shown).
+    """
+    old_keys, new_keys = [_key(_body(r)) + str(bool(r.get("disabled"))) for r in old], \
+                         [_key(_body(r)) + str(bool(r.get("disabled"))) for r in new]
+    if sorted(old_keys) == sorted(new_keys) and old_keys != new_keys:
+        return None, "rules were moved"
+    # (index in new, the rule before the edit or None) for each rule that changed
+    changed: list[tuple[int, dict | None]] = []
+    ops = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False).get_opcodes()
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            continue
+        if tag == "delete" or (tag == "replace" and i2 - i1 != j2 - j1):
+            return None, "a rule was moved or removed"
+        changed += [(j, None if tag == "insert" else old[i1 + j - j1]) for j in range(j1, j2)]
+
+    later = [_leaf_map(r, kind) for r in new]
+    out = []
+    for j, before in changed:
+        rule = new[j]
+        if rule.get("disabled"):
+            if before is not None and not before.get("disabled"):
+                return None, "a rule was turned off"
+            continue                                 # edits to a rule that is off do nothing
+        was = _leaf_map(before, kind) if before is not None else {}
+        if was and _key(_matchers(before)) != _key(_matchers(rule)):
+            return None, "a match or exclude line changed"
+        if before is not None and _key({k: v for k, v in _body(before).items() if k != "children"}) \
+                != _key({k: v for k, v in _body(rule).items() if k != "children"}):
+            return None, "a rule changed"
+        now = later[j]
+        if set(was) - set(now):
+            return None, f"{label_of(sorted(set(was) - set(now))[0], kind)} was removed from a rule"
+        paths = [p for p, node in now.items() if p not in was or _key(was[p]) != _key(node)]
+        for p in paths:
+            if any(p in later[k] for k in range(j + 1, len(new))):
+                return None, f"a later rule also sets {label_of(p, kind).lower()}"
+        if not paths:
+            continue
+        added = {"args": [], "props": {}, "children": copy.deepcopy(_matchers(rule))}
+        for p in paths:
+            node = now[p]
+            set_prop(added, p, {k: v for k, v in node.items() if k != "name"} if not p.endswith("/state")
+                     else {"args": node["args"], "props": {}})
+        out.append(added)
+    return out, ""
 
 
 # --------------------------------------------------------------------------
