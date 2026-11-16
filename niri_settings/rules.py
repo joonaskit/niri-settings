@@ -192,6 +192,28 @@ def facts(window: dict, workspaces: dict, cast_targets: set | None, focused_outp
     }
 
 
+# What niri sees when it settles a window's open-* properties: the window is
+# not mapped yet, so it is not focused, active, floating, urgent or cast, and it
+# is a column of its own. Checked against real niri in tests/test_nested.py.
+OPEN_STATE = {
+    "is-focused": False,
+    "is-active": False,
+    "is-floating": False,
+    "is-urgent": False,
+    "is-window-cast-target": False,
+    "is-active-in-column": True,
+}
+
+
+def at_open(f: dict) -> dict:
+    """The facts as niri saw them when the window opened.
+
+    app-id and title are taken as they are now; a window that changed its
+    title since opening may have matched differently.
+    """
+    return dict(f, **OPEN_STATE)
+
+
 def window_facts(windows: dict, workspaces: dict, cast_targets: set | None) -> dict:
     """id -> facts for every open window."""
     sizes: dict[tuple, int] = {}
@@ -336,13 +358,20 @@ def when_of(path: str) -> str:
     return known["when"] if known else "always"
 
 
-def merged(rules: list[dict], verdicts: list[Verdict]) -> list[dict]:
-    """The values a window ends up with: {path, value, rule, earlier, maybe}."""
+def merged(rules: list[dict], verdicts: list[Verdict],
+           open_verdicts: list[Verdict] | None = None) -> list[dict]:
+    """The values a window ends up with: {path, value, rule, earlier, maybe}.
+
+    Properties niri applies when the window opens are judged by
+    `open_verdicts` (rules checked against `at_open` facts) when given.
+    """
     out: dict[str, dict] = {}
-    for i, (rule, v) in enumerate(zip(rules, verdicts)):
-        if v.status == NO:
-            continue
+    open_verdicts = open_verdicts or verdicts
+    for i, (rule, now, then) in enumerate(zip(rules, verdicts, open_verdicts)):
         for path, node in leaves(rule.get("children", [])):
+            v = then if when_of(path) == "open" else now
+            if v.status == NO:
+                continue
             value = node["args"][0] if path.endswith("/state") else tail(node)
             prev = out.get(path)
             earlier = (prev["earlier"] + [prev["rule"]]) if prev else []

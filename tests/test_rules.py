@@ -343,6 +343,21 @@ class Matching(unittest.TestCase):
         self.assertEqual(values["focus-ring/active-color"]["value"], '"red"')
         self.assertTrue(values["open-on-output"]["maybe"])
 
+    def test_open_properties_use_the_state_at_open(self):
+        # Window 1 floats now, but was not floating when niri opened it.
+        rules = [rule(match(app_id="firefox", is_floating=False),
+                      prop("open-on-workspace", "two"), prop("opacity", 0.5))]
+        now = [rl.check_rule(r, self.facts[1]) for r in rules]
+        opened = [rl.check_rule(r, rl.at_open(self.facts[1])) for r in rules]
+        self.assertEqual((now[0].status, opened[0].status), (rl.NO, rl.YES))
+        values = {m["path"]: m for m in rl.merged(rules, now, opened)}
+        self.assertEqual(values["open-on-workspace"]["value"], '"two"')
+        self.assertNotIn("opacity", values)              # applies only while the rule matches now
+        self.assertEqual(rl.merged(rules, now), [])      # without open verdicts: current state only
+        f = rl.at_open(self.facts[2])
+        self.assertEqual((f["is-focused"], f["is-active"], f["is-active-in-column"]), (False, False, True))
+        self.assertIsNone(f["at-startup"])
+
     def test_cast_targets(self):
         self.assertEqual(rl.cast_targets({"Casts": []}), set())
         self.assertEqual(rl.cast_targets({"Casts": [{"target": {"Window": {"id": 7}}}]}), {7})
