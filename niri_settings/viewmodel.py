@@ -66,9 +66,10 @@ class Backend(QObject):
     stateChanged = Signal()    # niri windows / workspaces
     _ipcEvent = Signal()       # from the event-stream thread
 
-    def __init__(self, main_path: str | None = None, live: bool = True):
+    def __init__(self, main_path: str | None = None, live: bool = True, setup: bool = False):
         super().__init__()
         self.config = Config(main_path)
+        self._setup = setup or not self.config.setup_done
         self._revision = 0
         self._valid = (True, "")
         self._error = None
@@ -302,6 +303,56 @@ class Backend(QObject):
     @Slot()
     def enablePreview(self):
         self._finish(*self.config.enable_preview())
+
+    # -- first run
+
+    @Property(bool, notify=changed)
+    def setupNeeded(self):
+        return self._setup
+
+    @Property("QVariantMap", notify=changed)
+    def setupInfo(self):
+        cfg = self.config
+        home = os.path.expanduser("~")
+        mode, reason = cfg.suggested_mode()
+        exists = os.path.exists(cfg.main)
+        files = [f for f in cfg.tree.files()
+                 if f not in (cfg.preview_file, cfg.managed_file) and cfg.tree.exists(f)]
+        return {
+            "path": ("~" + cfg.main[len(home):]) if cfg.main.startswith(home) else cfg.main,
+            "exists": exists,
+            "files": len(files),
+            "defaultSource": cfg.default_source() or "",
+            "suggested": cfg.write_mode if cfg.managed_enabled else mode,
+            "reason": reason,
+            "managedIncluded": cfg.managed_enabled,
+            "previewIncluded": cfg.preview_enabled,
+        }
+
+    @Slot(str, bool, result=str)
+    def finishSetup(self, mode, preview):
+        """Apply the first-run choices. Returns an error, or "" when done."""
+        ok, message = self.config.first_run(mode, preview)
+        if not ok:
+            return message
+        self._setup = False
+        self._notice = "Set up for " + ("managed" if mode == MANAGED else "in-place") + " mode"
+        self._rewatch()
+        self._touch(keep_notice=True)
+        return ""
+
+    @Slot(result=str)
+    def skipSetup(self):
+        """Keep the current write mode and no live preview. A missing config.kdl
+        is still created from niri's default, so a later save cannot leave
+        niri with only the saved settings."""
+        ok, message = self.config.first_run(self.config.write_mode, False)
+        if not ok:
+            return message
+        self._setup = False
+        self._rewatch()
+        self._touch()
+        return ""
 
     # -- write mode, files, snapshots
 

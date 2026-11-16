@@ -7,11 +7,11 @@ import unittest
 
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
-from app import ipc, niri_core
-from app import rules as rl
-from app.config import MANAGED, Config, ReadOnlyError
-from app.rules import RulesModel
-from app.rules_view import RulesView
+from niri_settings import ipc, niri_core
+from niri_settings import rules as rl
+from niri_settings.config import MANAGED, Config, ReadOnlyError
+from niri_settings.rules import RulesModel
+from niri_settings.rules_view import RulesView
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT = os.path.join(HERE, "corpus", "default", "config.kdl")

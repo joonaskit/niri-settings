@@ -44,6 +44,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+S"; enabled: saveButton.enabled; onActivated: backend.save() }
 
     DiffDialog { id: diffDialog; diff: backend.diffText }
+    SetupDialog { id: setupDialog }
+    Component.onCompleted: if (backend.setupNeeded) setupDialog.open()
 
     ColumnLayout {
         anchors.fill: parent

@@ -1166,14 +1166,15 @@ class Tree:
                                self._depth.get(old.path, 0) + 1)
 
 
-def load_tree(main_path: str, skip: tuple[str, ...] = ()) -> Tree:
+def load_tree(main_path: str, skip: tuple[str, ...] = (), missing_ok: bool = False) -> Tree:
     """Read a config file and every file it includes.
 
-    Files in `skip` keep their place in the tree but are read as empty.
+    Files in `skip` keep their place in the tree but are read as empty. With
+    `missing_ok`, a main file that does not exist loads as an empty one.
     """
     main = os.path.normpath(os.path.abspath(os.path.expanduser(main_path)))
     tree = Tree(main, skip)
-    tree._load(main)
+    tree._load(main, optional=missing_ok)
     return tree
 
 

@@ -3,7 +3,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import "."
 
-// A page drawn from app/schema/pages.py: groups of setting cards.
+// A page drawn from niri_settings/schema/pages.py: groups of setting cards.
 ScrollView {
     id: page
     property string pageId: ""

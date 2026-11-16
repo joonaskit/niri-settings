@@ -28,6 +28,10 @@ PREVIEW_NAME = "niri-gui-preview.kdl"
 MANAGED_NAME = "niri-gui.kdl"
 IN_PLACE, MANAGED = "in-place", "managed"
 SNAPSHOT_KEEP = 50
+# Where distributions put niri's default config; used when config.kdl is missing.
+DEFAULT_CONFIGS = ("/usr/share/doc/niri/default-config.kdl",
+                   "/usr/share/niri/default-config.kdl",
+                   "/usr/local/share/doc/niri/default-config.kdl")
 
 
 class ReadOnlyError(Exception):
@@ -115,7 +119,8 @@ class Config:
     def _load(self) -> niri_core.Tree:
         # The preview overlay holds unsaved changes; reading it back as config
         # would make them look saved.
-        return niri_core.load_tree(self.main, skip=(self.preview_file,))
+        # A missing config.kdl loads empty: first run creates it.
+        return niri_core.load_tree(self.main, skip=(self.preview_file,), missing_ok=True)
 
     # -- reading
 
@@ -744,6 +749,86 @@ class Config:
         settings.setdefault("write_mode", {})[self.main] = mode
         _save_settings(settings)
         return True, note
+
+    # -- first run
+
+    @property
+    def setup_done(self) -> bool:
+        """True once the first-run choices were made (or skipped) for this config.
+
+        A config that already has a write mode on record set up an earlier version.
+        """
+        settings = _load_settings()
+        return self.main in settings.get("setup_done", []) or self.main in settings.get("write_mode", {})
+
+    def mark_setup_done(self):
+        settings = _load_settings()
+        done = settings.setdefault("setup_done", [])
+        if self.main not in done:
+            done.append(self.main)
+        _save_settings(settings)
+
+    def default_source(self) -> str | None:
+        """niri's own default config, to start from when config.kdl is missing."""
+        return next((p for p in DEFAULT_CONFIGS if os.path.isfile(p)), None)
+
+    def suggested_mode(self) -> tuple[str, str]:
+        """The write mode to suggest first, and why.
+
+        Managed when the config looks generated or version-controlled: a symlink
+        (home-manager, stow), the Nix store, or a git work tree.
+        """
+        if os.path.islink(self.main):
+            return MANAGED, "config.kdl is a symlink, as dotfile managers make it"
+        real = os.path.realpath(self.main)
+        if real.startswith("/nix/store/"):
+            return MANAGED, "config.kdl is in the Nix store"
+        stop = os.path.expanduser("~")
+        d = os.path.dirname(real)
+        while d and d != os.path.dirname(d):
+            if os.path.exists(os.path.join(d, ".git")):
+                return MANAGED, "config.kdl is in a git repository"
+            if d == stop:
+                break
+            d = os.path.dirname(d)
+        return IN_PLACE, ""
+
+    def create_main(self) -> tuple[bool, str]:
+        """Write config.kdl from niri's default config when it does not exist."""
+        if os.path.exists(self.main):
+            return True, ""
+        source = self.default_source()
+        text = (_read(source) or "") if source else ""
+        if not text:
+            text = "// niri config. See https://niri-wm.github.io/niri/Configuration%3A-Introduction.html\n"
+        try:
+            _write_atomic(self.main, text)
+        except OSError as e:
+            return False, f"Could not create {self.main}: {e.strerror or e}"
+        self.reload()
+        return True, ""
+
+    def first_run(self, mode: str, preview: bool) -> tuple[bool, str]:
+        """Apply the first-run choices: create config.kdl if needed, pick the
+        write mode and optionally include the live-preview file. Each include
+        line is its own validated, snapshotted write."""
+        steps = [self.create_main]
+        if mode != self.write_mode:
+            steps.append(lambda: self.set_write_mode(mode))
+        if preview:
+            steps.append(self.enable_preview)
+        for step in steps:
+            try:
+                ok, message = step()
+            except OSError as e:
+                ok, message = False, f"Could not write the config: {e.strerror or e}"
+            if not ok:
+                return False, message
+        settings = _load_settings()
+        settings.setdefault("write_mode", {})[self.main] = self.write_mode
+        _save_settings(settings)
+        self.mark_setup_done()
+        return True, ""
 
     # -- live preview
 

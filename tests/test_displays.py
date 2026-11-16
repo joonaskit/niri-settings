@@ -7,8 +7,8 @@ import tempfile
 import time
 import unittest
 
-from app.config import MANAGED, Config, ReadOnlyError
-from app.displays import DisplayModel, snap_position
+from niri_settings.config import MANAGED, Config, ReadOnlyError
+from niri_settings.displays import DisplayModel, snap_position
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -227,7 +227,7 @@ class Guard(unittest.TestCase):
     def spawn(self, seconds):
         import json
         import subprocess
-        return subprocess.Popen([sys.executable, "-m", "app.output_guard", str(seconds),
+        return subprocess.Popen([sys.executable, "-m", "niri_settings.output_guard", str(seconds),
                                  json.dumps([["touch", self.flag]])],
                                 stdin=subprocess.PIPE, text=True, cwd=ROOT)
 

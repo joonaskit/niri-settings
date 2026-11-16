@@ -6,8 +6,8 @@ import tempfile
 import time
 import unittest
 
-from app import niri_core
-from app.config import IN_PLACE, MANAGED, Config, ReadOnlyError, _parse_error
+from niri_settings import niri_core
+from niri_settings.config import IN_PLACE, MANAGED, Config, ReadOnlyError, _parse_error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HAVE_NIRI = shutil.which("niri") is not None
@@ -93,7 +93,7 @@ class Snapshots(Base):
                          (False, "Save or revert your unsaved changes first."))
 
     def test_named_snapshots_survive_pruning(self):
-        import app.config as config
+        import niri_settings.config as config
         old_keep, config.SNAPSHOT_KEEP = config.SNAPSHOT_KEEP, 2
         try:
             first = self.cfg._snapshot([self.main], "before save")
@@ -110,7 +110,7 @@ class Snapshots(Base):
         self.cfg.set("layout/gaps", 3)
         self.cfg.set("layout/center-focused-column", "always")
         before = self.tree_on_disk()
-        import app.config as config
+        import niri_settings.config as config
         real, calls = config._write_atomic, []
 
         def flaky(path, text):
