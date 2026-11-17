@@ -227,7 +227,8 @@ class RuleListView(QObject):
         args, props, kids = node.get("args", []), node.get("props", {}), node.get("children")
         item = {"path": path, "label": rl.label_of(path, self.kind), "when": rl.when_of(path, self.kind),
                 "text": rl.tail(node) if not path.endswith("/state") else str(args[0]),
-                "options": [], "value": None, "wide": False}
+                "options": [], "value": None, "wide": False,
+                "suggest": known.get("suggest", "") if known else ""}
         try:
             if kind == "bool":
                 value = args[0] if args else True

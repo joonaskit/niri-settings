@@ -143,6 +143,12 @@ rule's name is the first line of the `//` comment right above it.
 - Select a window to see which rules apply to it and the merged values. Later rules win,
   and the `focus-ring`, `border`, `shadow`, `tab-indicator`, `background-effect` and
   `popups` blocks merge child by child. "Pick a window…" uses `niri msg pick-window`.
+- `open-on-output` and `open-on-workspace` offer names as you type: connected outputs
+  from niri (connector, and make, model and serial), outputs named in the config, and
+  named workspaces. A monitor with a serial is listed twice, by port and by make, model
+  and serial, with a shared colour and a note on why. A name niri does not know gets a note, since niri then quietly opens
+  the window on the usual output or workspace. Tablet and touch "Map to output" work the
+  same way. Offline, unknown outputs are not flagged.
 - A rule with no match that only sets focus ring or border looks points to the Layout
   page, which sets them for every window. A border or focus ring property notes when that
   block is off in the layout and the rule does not turn it on, since it then shows nothing.
