@@ -14,38 +14,18 @@ import time
 from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtQml import QJSValue
 
-from . import ipc, niri_core
+from . import gradients, ipc, niri_core
 from . import rules as rl
 from .rules import RulesModel
-from .schema.window_rules import GRADIENT_RELATIVE, GRADIENT_SPACES
 
 _SIZE_KINDS = [{"label": "proportion", "value": "proportion"}, {"label": "fixed px", "value": "fixed"},
                {"label": "app decides", "value": ""}]
 _WIDE = {"size", "position", "kdl", "xy", "gradient"}
-_GRADIENT_KEYS = {"from", "to", "angle", "relative-to", "in"}
+_LAYOUT_ONOFF = {"focus-ring": True, "border": False}   # niri's defaults
 
 
 def _options(values) -> list[dict]:
     return [{"label": v, "value": v} for v in values]
-
-
-def _gradient_props(value: dict) -> dict:
-    """niri's props for a gradient, leaving out what niri does by default."""
-    start, end = str(value.get("from", "")).strip(), str(value.get("to", "")).strip()
-    if not start or not end:
-        raise ValueError("A gradient needs a from and a to colour")
-    try:
-        angle = _number(value.get("angle", 180), "int")    # niri takes whole degrees only
-    except (TypeError, ValueError):
-        raise ValueError("The gradient angle needs a whole number of degrees")
-    props = {"from": start, "to": end}
-    if angle != 180:
-        props["angle"] = angle
-    if value.get("rel", "window") != "window":
-        props["relative-to"] = value["rel"]
-    if value.get("in", "srgb") != "srgb":
-        props["in"] = value["in"]
-    return props
 
 
 def _number(text, kind: str):
@@ -285,22 +265,23 @@ class RuleListView(QObject):
                 if kind == "position":
                     item["options"] = _options(known["options"])
             elif kind == "gradient":
-                angle = props.get("angle", 180)
-                if (args or kids or set(props) - _GRADIENT_KEYS or not {"from", "to"} <= set(props)
-                        or isinstance(angle, bool) or not isinstance(angle, int)):
+                item["value"] = gradients.read(node)
+                if item["value"] is None:
                     raise TypeError
-                rel, space = str(props.get("relative-to", "window")), str(props.get("in", "srgb"))
-                if rel not in GRADIENT_RELATIVE or space not in GRADIENT_SPACES:
-                    raise TypeError
-                item["value"] = {"from": str(props["from"]), "to": str(props["to"]), "angle": angle,
-                                 "rel": rel, "in": space}
-                item["relOptions"] = _options(GRADIENT_RELATIVE)
-                item["inOptions"] = _options(GRADIENT_SPACES)
+                item["relOptions"] = gradients.options(gradients.RELATIVE)
+                item["inOptions"] = gradients.options(gradients.SPACES)
         except (TypeError, IndexError, KeyError):
             kind = "kdl"
         item["kind"] = kind
         item["wide"] = kind in _WIDE
         return item
+
+    def _block_shown(self, rule: dict, block: str) -> bool:
+        """Whether a focus-ring or border block is drawn: the rule turns it on, or the layout has it on."""
+        state = rl.get_prop(rule, f"{block}/state")
+        if state is not None:
+            return state.get("args") == ["on"]
+        return self.backend.config.is_on(f"layout/{block}", _LAYOUT_ONOFF[block])
 
     def _directive_items(self, rule: dict, f: dict | None) -> list[dict]:
         out = []
@@ -338,8 +319,14 @@ class RuleListView(QObject):
             beaten = {self.kind.PROP_PATHS[it["path"]]["overrides"]: it["label"] for it in items
                       if it["path"] in self.kind.PROP_PATHS and "overrides" in self.kind.PROP_PATHS[it["path"]]}
             for it in items:
-                if it["path"] in beaten:
-                    it["note"] = f"{beaten[it['path']]} wins over this"
+                notes = [f"{beaten[it['path']]} wins over this"] if it["path"] in beaten else []
+                block = it["path"].split("/", 1)[0]
+                if block in _LAYOUT_ONOFF and "/" in it["path"] and not it["path"].endswith("/state") \
+                        and not self._block_shown(rule, block):
+                    name = rl.label_of(f"{block}/state", self.kind)
+                    notes.append(f"{name} is off in your layout: add {name} set to on to this rule to show it")
+                if notes:
+                    it["note"] = ". ".join(notes)
             addable = [{"label": ("At open: " if p["when"] == "open" else "") + p["label"], "value": p["path"]}
                        for p in self.kind.PROPS if p["path"] not in used]
             text = src["text"]
@@ -353,6 +340,9 @@ class RuleListView(QObject):
                 "first": i == 0, "last": i == len(self._rules()) - 1,
                 "directives": self._directive_items(rule, f),
                 "matchesAll": not matches,
+                "globalNote": "The Layout page sets the focus ring and border for every window."
+                              if not matches and items and all(it["path"].split("/", 1)[0] in _LAYOUT_ONOFF
+                                                               for it in items) else "",
                 "open": [it for it in items if it["when"] == "open"],
                 "always": [it for it in items if it["when"] != "open"],
                 "addable": addable,
@@ -477,7 +467,7 @@ class RuleListView(QObject):
                 props["relative-to"] = value["rel"]
             return {"args": [], "props": props}
         if kind == "gradient":
-            return {"args": [], "props": _gradient_props(value)}
+            return {"args": [], "props": gradients.props_of(value)}
         text = str(value).strip()
         name = path.rsplit("/", 1)[-1]
         try:

@@ -146,6 +146,21 @@ class Config:
         return [dict(n["value"], comment=n["comment"], **({"disabled": True} if n["disabled"] else {}))
                 for n in self.tree.top_nodes(name)]
 
+    def is_on(self, path: str, default: bool) -> bool:
+        """Whether a section with on/off flags (focus-ring, border) is enabled."""
+        if self.get(path + "/off") is not None:
+            # A later `on` beats an earlier `off`, and the other way round.
+            on, off = self.source(path + "/on"), self.source(path + "/off")
+            order = self.tree.files()
+            return bool(on) and ((order.index(on["file"]), on["line"])
+                                 > (order.index(off["file"]), off["line"]))
+        if self.get(path + "/on") is not None:
+            return True
+        if self.get(path) is not None and path == "layout/border":
+            # Historic special case: a border section in the main file enables it.
+            return self.source(path)["file"] == self.main
+        return default
+
     def source(self, path: str) -> dict | None:
         return self.tree.source_of(path)
 

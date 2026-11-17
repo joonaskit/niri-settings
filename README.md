@@ -78,6 +78,17 @@ config path, a label and niri's default. Each card shows where its value is set.
 `file:line` link opens the source editor at the line, and Reset removes the setting so
 niri's default applies. The search box in the top bar covers every setting on every page.
 
+Focus ring and border colours are on the Layout page, and tab colours on Appearance. Each
+of active, inactive and urgent has a colour field and an optional gradient, edited like
+the one in window rules. Clearing a colour field removes the colour so niri's default
+applies. A gradient the editor cannot show (a fractional angle, an unknown colour space)
+is listed as KDL with a link to the source. The layout preview draws the active ring and
+border colours, using a gradient's start colour.
+
+Every colour swatch, on the pages and in window rules, opens a colour picker:
+a saturation/brightness square, hue and opacity bars, a few niri colours and a hex
+field. Use writes `#rrggbb`, or `#rrggbbaa` when the colour is see-through.
+
 Config files lists each top-level section of the config and the page that edits it.
 `switch-events`, `debug` and `recent-windows › binds` are source-only for
 now.
@@ -132,6 +143,9 @@ rule's name is the first line of the `//` comment right above it.
 - Select a window to see which rules apply to it and the merged values. Later rules win,
   and the `focus-ring`, `border`, `shadow`, `tab-indicator`, `background-effect` and
   `popups` blocks merge child by child. "Pick a window…" uses `niri msg pick-window`.
+- A rule with no match that only sets focus ring or border looks points to the Layout
+  page, which sets them for every window. A border or focus ring property notes when that
+  block is off in the layout and the rule does not turn it on, since it then shows nothing.
 - Gradients (`active-`, `inactive-` and `urgent-gradient` in `focus-ring`, `border` and
   `tab-indicator`) get from and to colours, a whole-degree angle, what they are relative
   to and the colour space they blend in. niri's defaults (angle 180, per window, srgb) are
@@ -167,6 +181,7 @@ niri_settings/
   binds_view.py  the Key bindings page's object in QML
   rules.py       window and layer rules: matching, merging, edits (no Qt)
   rules_view.py  the Window rules and Layer rules pages' objects in QML
+  gradients.py   reading and writing niri gradients, for rules and the Layout page
   schema/        settings definitions that drive the forms (pages.py, layout.py);
                  the action catalogue; window- and layer-rule matchers, properties and templates
   qml/           Theme.qml (style tokens), shared controls, pages, the first-run dialog

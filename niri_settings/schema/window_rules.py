@@ -17,6 +17,8 @@ Matcher kinds: regex, bool, and enum (one of `options`).
 "always" for those it keeps applying.
 """
 
+from .. import gradients
+
 NAME = "window-rule"
 SUBJECT = "window"           # what a rule matches, for messages
 SUBJECTS = "windows"
@@ -48,19 +50,11 @@ def _ring(prefix: str, label: str, since: str = "") -> list[dict]:
     ]
 
 
-# Colour spaces a gradient can blend through (`in=`); srgb is niri's default.
-GRADIENT_SPACES = ["srgb", "srgb-linear", "oklab", "oklch shorter hue", "oklch longer hue",
-                   "oklch increasing hue", "oklch decreasing hue"]
-GRADIENT_RELATIVE = ["window", "workspace-view"]   # `window` is niri's default: no relative-to
-
-
 def _gradients(prefix: str, label: str) -> list[dict]:
     """active-, inactive- and urgent-gradient, which win over the colours of the same block."""
-    starts = {"active": ("#80c8ff", "#bbddff"), "inactive": ("#505050", "#808080"), "urgent": ("#880000", "#aa3333")}
     return [{"path": f"{prefix}/{state}-gradient", "label": f"{label} {state} gradient", "kind": "gradient",
-             "default": {"from": a, "to": b, "angle": 45, "rel": "window", "in": "srgb"},
-             "overrides": f"{prefix}/{state}-color"}
-            for state, (a, b) in starts.items()]
+             "default": gradients.default(state), "overrides": f"{prefix}/{state}-color"}
+            for state in gradients.STATES]
 
 
 def _effect(prefix: str, label: str) -> list[dict]:

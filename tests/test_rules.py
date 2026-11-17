@@ -740,7 +740,9 @@ class View(Base):
         self.assertTrue(grad["wide"])
         self.assertEqual(grad["value"], {"from": "#80c8ff", "to": "#bbddff", "angle": 45,
                                          "rel": "window", "in": "srgb"})
-        self.assertEqual(items["border/active-color"]["note"], "Border active gradient wins over this")
+        # both notes: the gradient wins, and the default config has the border off
+        self.assertEqual(items["border/active-color"]["note"], "Border active gradient wins over this. "
+                         "Border is off in your layout: add Border set to on to this rule to show it")
         # non-default fields are written; niri's defaults are left out again
         v.setProp("border/active-gradient", dict(grad["value"], rel="workspace-view", **{"in": "oklch longer hue"}))
         self.assertIn('active-gradient from="#80c8ff" to="#bbddff" angle=45 relative-to="workspace-view" '
@@ -766,6 +768,24 @@ class View(Base):
         self.assertEqual(v.detail["error"], "")
         ok, message = self.config.validate()
         self.assertTrue(ok, message)
+
+    def test_notes_when_the_layout_hides_a_block(self):
+        v = self.view
+        v.newRule("blank")                         # no match: every window
+        v.addProp("border/active-color")
+        items = {p["path"]: p for p in v.detail["always"]}
+        # the default config has `border { off; }`: the colour alone shows nothing
+        self.assertEqual(items["border/active-color"]["note"],
+                         "Border is off in your layout: add Border set to on to this rule to show it")
+        self.assertEqual(v.detail["globalNote"], "The Layout page sets the focus ring and border for every window.")
+        v.setProp("border/state", "on")
+        items = {p["path"]: p for p in v.detail["always"]}
+        self.assertNotIn("note", items["border/active-color"])
+        v.addProp("focus-ring/active-color")         # the ring is on in the layout
+        items = {p["path"]: p for p in v.detail["always"]}
+        self.assertNotIn("note", items["focus-ring/active-color"])
+        v.addProp("opacity")                         # not only looks any more
+        self.assertEqual(v.detail["globalNote"], "")
 
     def test_gradient_the_editor_cannot_show_falls_back_to_kdl(self):
         v = self.view
