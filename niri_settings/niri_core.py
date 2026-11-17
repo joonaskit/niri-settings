@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import difflib
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
 
 __all__ = ["KdlError", "Raw", "Tree", "load_tree", "load_string", "format_node", "format_value",
-           "format_block"]
+           "format_block", "split_path", "retarget_includes"]
 
 # Sections whose contents niri treats as one combined value: a later
 # occurrence replaces the earlier one instead of merging into it.
@@ -260,7 +261,10 @@ class _Parser:
                         close = t.find("}", i)
                         if t[i + 1:i + 2] != "{" or close < 0:
                             self.fail(i, "bad \\u escape")
-                        out.append(chr(int(t[i + 2:close], 16)))
+                        try:
+                            out.append(chr(int(t[i + 2:close], 16)))
+                        except (ValueError, OverflowError):
+                            self.fail(i, "bad \\u escape")
                         i = close + 1
                         continue
                     if e in _SPACES or e in _NEWLINES:  # KDL v2 whitespace escape
@@ -357,6 +361,8 @@ def format_value(value: object) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{value} is not a number niri can read")
         # Always with a decimal point: niri reads `1` and `1.0` differently
         # for some decimal properties (spring damping-ratio rejects `1`).
         if value == int(value) and abs(value) < 1e15:
@@ -479,10 +485,11 @@ class _Segment:
         return True
 
 
-def _segments(path: str) -> list[_Segment]:
+def split_path(path: str) -> list[str]:
+    """A path's segments. Splits on "/" but not inside [..], so a key such
+    as workspace[web/dev] stays one segment."""
     if not path:
         return []
-    # Split on "/" but not inside [..], so output[/dev/x] style keys survive.
     parts, depth, cur = [], 0, ""
     for c in path:
         if c == "[":
@@ -495,7 +502,11 @@ def _segments(path: str) -> list[_Segment]:
         else:
             cur += c
     parts.append(cur)
-    return [_Segment.parse(p) for p in parts if p]
+    return [p for p in parts if p]
+
+
+def _segments(path: str) -> list[_Segment]:
+    return [_Segment.parse(p) for p in split_path(path)]
 
 
 def _node_value(node: Node) -> object:
@@ -645,8 +656,11 @@ class Tree:
                 return f"{node.name}#{next(i for i, n in enumerate(same) if n is node)}"
             return node.name
 
+        top = list(self._top())
+        if not any(tf is f for tf, _ in top):
+            return None     # no longer included: niri does not read it
         parts: list[str] = []
-        siblings = [n for _, n in self._top()]
+        siblings = [n for _, n in top]
         level = f.nodes
         while True:
             hit = next((n for n in level if line_of(n.start) <= line <= line_of(max(n.start, n.end - 1))), None)
@@ -719,8 +733,8 @@ class Tree:
             return None
         f, node = found[-1]
         overridden = []
-        segs = path.split("/")
-        if segs[0] == "layout":
+        segs = split_path(path)
+        if segs and segs[0] == "layout":
             for kind in ("output", "workspace"):
                 for p in self.list(""):
                     if p.startswith(kind + "[") and self._resolve(p + "/" + path):
@@ -777,7 +791,7 @@ class Tree:
     def set(self, path: str, value, file: str):
         """Change or add one node in one file."""
         f = self._file(file)
-        segs = path.split("/") if path else []
+        segs = split_path(path)
         if not segs:
             raise ValueError("empty path")
         node = self._find_in_file(f, path)
@@ -810,7 +824,7 @@ class Tree:
             return
         src, node = found[-1]
         raw = (src.text[node.start:node.end], self._indent_of(src.text, node.start))
-        segs = path.split("/")
+        segs = split_path(path)
         depth, parent = len(segs) - 1, None
         while depth > 0:
             parent = self._find_in_file(f, "/".join(segs[:depth]))
@@ -1184,14 +1198,24 @@ class Tree:
         changing nothing, if it does not parse. New includes are loaded."""
         f = self._file(file)
         nodes, disabled = _parse(text, f.path)
+        before = (f.text, f.nodes, f.disabled)
+        known = set(self._files)
         f.text, f.nodes, f.disabled = text, nodes, disabled
-        for node in nodes:
-            if node.name == "include":
-                target = self._include_target(f, node)
-                if target and target not in self._files:
-                    line = text.count("\n", 0, node.start) + 1
-                    self._load(target, bool(node.props.get("optional")), (f.path, line),
-                               self._depth.get(f.path, 0) + 1)
+        try:
+            for node in nodes:
+                if node.name == "include":
+                    target = self._include_target(f, node)
+                    if target and target not in self._files:
+                        line = text.count("\n", 0, node.start) + 1
+                        self._load(target, bool(node.props.get("optional")), (f.path, line),
+                                   self._depth.get(f.path, 0) + 1)
+        except KdlError:
+            # A new include that is missing or does not parse: undo it all.
+            f.text, f.nodes, f.disabled = before
+            for path in set(self._files) - known:
+                del self._files[path]
+                self._depth.pop(path, None)
+            raise
 
     def reload_file(self, file: str):
         """Re-read one file from disk, dropping its in-memory edits."""
@@ -1204,6 +1228,27 @@ class Tree:
                 if target and target not in self._files:
                     self._load(target, bool(node.props.get("optional")), (old.path, 0),
                                self._depth.get(old.path, 0) + 1)
+
+
+def retarget_includes(text: str, file: str, targets: dict[str, str]) -> str:
+    """The text with each top-level include that resolves to a key of
+    `targets` pointed at the matching value instead (an absolute path).
+
+    Used to validate a staged copy: an include written as an absolute or ~
+    path would otherwise still read the real file.
+    """
+    nodes, _ = _parse(text, file)
+    edits = []
+    for node in nodes:
+        if node.name != "include" or not node.args or not isinstance(node.args[0], str):
+            continue
+        target = Tree._include_target(_File(file, text, text, [], True), node)
+        entry = next(e for e in node.entries if e.name is None)
+        if target in targets:
+            edits.append((entry.start, entry.end, format_value(targets[target])))
+    for start, end, new in reversed(edits):
+        text = text[:start] + new + text[end:]
+    return text
 
 
 def load_tree(main_path: str, skip: tuple[str, ...] = (), missing_ok: bool = False) -> Tree:

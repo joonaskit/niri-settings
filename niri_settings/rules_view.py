@@ -7,6 +7,7 @@ are drawn by RulesPage.qml, which takes its wording from `words`.
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -30,6 +31,8 @@ def _options(values) -> list[dict]:
 
 def _number(text, kind: str):
     value = float(str(text).strip().replace(",", "."))
+    if not math.isfinite(value):
+        raise ValueError
     if kind == "int":
         if value != int(value):
             raise ValueError
@@ -457,6 +460,8 @@ class RuleListView(QObject):
                 return {"args": [], "props": {}, "children": []}
             try:
                 number = float(str(number).replace(",", "."))
+                if not math.isfinite(number):
+                    raise ValueError
             except ValueError:
                 raise ValueError("Type a number: a share of the screen like 0.5, or pixels like 480")
             if size_kind == "fixed":

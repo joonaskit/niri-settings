@@ -117,6 +117,8 @@ class Config:
         self.last_error: dict | None = None
         # path -> {"mine": value, "disk": value} after an outside edit
         self.conflicts: dict[str, dict] = {}
+        # Why unsaved changes could not be put back by the last rebase
+        self.dropped: list[str] = []
 
     def _load(self) -> niri_core.Tree:
         # The preview overlay holds unsaved changes; reading it back as config
@@ -148,14 +150,14 @@ class Config:
 
     def is_on(self, path: str, default: bool) -> bool:
         """Whether a section with on/off flags (focus-ring, border) is enabled."""
-        if self.get(path + "/off") is not None:
-            # A later `on` beats an earlier `off`, and the other way round.
-            on, off = self.source(path + "/on"), self.source(path + "/off")
-            order = self.tree.files()
-            return bool(on) and ((order.index(on["file"]), on["line"])
-                                 > (order.index(off["file"]), off["line"]))
-        if self.get(path + "/on") is not None:
-            return True
+        # A later `on` beats an earlier `off`, and the other way round, in
+        # niri's reading order: an included file counts where it is included.
+        state = None
+        for e in self.tree.entries(path):
+            if e["name"] in ("on", "off"):
+                state = e["name"] == "on"
+        if state is not None:
+            return state
         if self.get(path) is not None and path == "layout/border":
             # Historic special case: a border section in the main file enables it.
             return self.source(path)["file"] == self.main
@@ -209,7 +211,7 @@ class Config:
         """
         if self.write_mode == MANAGED:
             return self.managed_file
-        parts = path.split("/")
+        parts = niri_core.split_path(path)
         for depth in range(len(parts), 0, -1):
             src = self.tree.source_of("/".join(parts[:depth]))
             if src and src["file"] != self.preview_file:
@@ -235,7 +237,7 @@ class Config:
         niri does not merge repeated output sections, so an overlay section
         would not add to the user's one. Refuse instead of guessing.
         """
-        head = path.split("/")[0]
+        head = (niri_core.split_path(path) or [""])[0]
         if self.write_mode != MANAGED or not head.startswith("output["):
             return
         src = self.tree.source_of(head)
@@ -250,7 +252,7 @@ class Config:
         owner = self._owner(path)
         if self.write_mode == MANAGED:
             # A section niri does not merge must be carried whole by the overlay.
-            parts = path.split("/")
+            parts = niri_core.split_path(path)
             for i in range(1, len(parts)):
                 section = "/".join(parts[:i])
                 if section in niri_core.NON_MERGING:
@@ -448,6 +450,7 @@ class Config:
         self.tree = tree
         self._baseline = {}
         self.conflicts = {}
+        self.dropped = []
         if self.write_mode == MANAGED and not self.managed_enabled:
             self.write_mode = IN_PLACE
         for path, value in mine.items():
@@ -455,7 +458,12 @@ class Config:
             if disk == value:
                 continue
             if disk == base[path]:
-                self._apply(path, value)
+                try:
+                    self._apply(path, value)
+                except ReadOnlyError as e:
+                    # The outside edit moved things so managed mode cannot
+                    # redo this change; say so instead of failing the rest.
+                    self.dropped.append(str(e))
             else:
                 self.conflicts[path] = {"mine": value, "disk": disk}
         return list(self.conflicts)
@@ -488,11 +496,17 @@ class Config:
             return overrides[f] if f in overrides else self.tree.original(f)
 
         with tempfile.TemporaryDirectory(prefix="niri-settings-") as tmp:
-            for f in files:
-                dest = os.path.join(tmp, os.path.relpath(f, root))
+            staged = {f: os.path.join(tmp, os.path.relpath(f, root)) for f in files}
+            for f, dest in staged.items():
+                text = text_of(f)
+                try:
+                    # Absolute and ~ includes would still read the real files.
+                    text = niri_core.retarget_includes(text, f, staged)
+                except niri_core.KdlError:
+                    pass    # niri reports the syntax error itself
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "w", encoding="utf-8", newline="") as fh:
-                    fh.write(text_of(f))
+                    fh.write(text)
             staged_main = os.path.join(tmp, os.path.relpath(self.main, root))
             try:
                 run = subprocess.run([self.niri_bin, "validate", "-c", staged_main],
@@ -893,7 +907,7 @@ class Config:
         root: dict = {}
         added: list[str] = []
         for path, value in self.pending.items():
-            parts = path.split("/")
+            parts = niri_core.split_path(path)
             if parts[0] in _RULE_KINDS:
                 extra, _ = self.rule_preview(parts[0])
                 added += [niri_core.format_block(parts[0], r) for r in extra or []]
