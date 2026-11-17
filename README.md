@@ -85,6 +85,10 @@ applies. A gradient the editor cannot show (a fractional angle, an unknown colou
 is listed as KDL with a link to the source. The layout preview draws the active ring and
 border colours, using a gradient's start colour.
 
+Every colour swatch, on the pages and in window rules, opens a colour picker:
+a saturation/brightness square, hue and opacity bars, a few niri colours and a hex
+field. Use writes `#rrggbb`, or `#rrggbbaa` when the colour is see-through.
+
 Config files lists each top-level section of the config and the page that edits it.
 `switch-events`, `debug` and `recent-windows › binds` are source-only for
 now.

@@ -69,14 +69,11 @@ Rectangle {
                     if (text !== String(current)) row.edited(text)
                 }
             }
-            Rectangle {
+            ColorSwatch {
                 visible: row.item.kind === "color"
-                implicitWidth: 18; implicitHeight: 18
-                radius: 4
-                color: visible ? Theme.cssColor(row.item.value) : "transparent"
-                border.width: 1
-                border.color: Theme.lineStrong
-                Accessible.ignored: true
+                value: visible ? String(row.item.value || "") : ""
+                label: row.item.label || "colour"
+                onPicked: v => row.edited(v)
             }
 
             // enum

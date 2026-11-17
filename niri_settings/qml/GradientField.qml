@@ -87,14 +87,11 @@ ColumnLayout {
                     Accessible.name: root.label + " " + modelData.name + " colour"
                     onEditingFinished: if (text !== root.value[modelData.key]) root.changed(modelData.key, text)
                 }
-                Rectangle {
+                ColorSwatch {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 18; height: 18
-                    radius: 4
-                    color: Theme.cssColor(root.value[modelData.key])
-                    border.width: 1
-                    border.color: Theme.lineStrong
-                    Accessible.ignored: true
+                    value: root.value[modelData.key] || ""
+                    label: root.label + " " + modelData.name + " colour"
+                    onPicked: v => root.changed(modelData.key, v)
                 }
             }
         }

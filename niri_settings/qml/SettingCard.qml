@@ -153,13 +153,11 @@ Card {
                             onEditingFinished: if (text !== entry.modelData.color)
                                                    backend.setText(entry.modelData.colorPath, text.trim())
                         }
-                        Rectangle {
-                            implicitWidth: 18; implicitHeight: 18; radius: 4
-                            color: Theme.cssColor(entry.modelData.color || entry.modelData.fallback)
-                            opacity: entry.modelData.color ? 1 : 0.5
-                            border.width: 1
-                            border.color: Theme.lineStrong
-                            Accessible.ignored: true
+                        ColorSwatch {
+                            value: entry.modelData.color
+                            fallback: entry.modelData.fallback
+                            label: card.setting.label + " " + entry.modelData.state
+                            onPicked: v => backend.setText(entry.modelData.colorPath, v)
                         }
                         Text {
                             Layout.fillWidth: true
@@ -431,14 +429,13 @@ Card {
                         else backend.setText(card.path, text)
                     }
                 }
-                Rectangle {
+                ColorSwatch {
                     visible: card.setting.kind === "color"
-                    implicitWidth: 28; implicitHeight: 28
-                    radius: Theme.radiusSmall
-                    color: Theme.cssColor(tk.stored || card.setting["default"])
-                    border.width: 1
-                    border.color: Theme.lineStrong
-                    Accessible.ignored: true
+                    size: 28
+                    value: tk.stored
+                    fallback: card.setting["default"] || ""
+                    label: card.setting.label
+                    onPicked: v => backend.setText(card.path, v)
                 }
             }
             Text {
