@@ -964,7 +964,8 @@ class Tree:
         """Every top-level node of this name, from every file, in niri's order.
 
         `comment` is the first line of the `//` comment right above the node,
-        which serves as the node's name in the app. `disabled` is true for a
+        which serves as the node's name in the app; a bare `//` first line
+        means no name. `disabled` is true for a
         node commented out with /-, which niri ignores; `text` then starts
         with the /-.
         """
@@ -1000,9 +1001,12 @@ class Tree:
         lines = self._comment_lines(f, node)
         if lines:
             start, end = lines[0]
+            indent = re.match(r"[ \t]*", f.text[start:end]).group(0)
             if comment:
-                indent = re.match(r"[ \t]*", f.text[start:end]).group(0)
                 self._splice(f, start, end, f"{indent}// {comment}\n")
+            elif len(lines) > 1:
+                # A bare // keeps the lines below from becoming the name.
+                self._splice(f, start, end, f"{indent}//\n")
             else:
                 self._splice(f, start, end, "")
         elif comment:

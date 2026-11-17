@@ -99,6 +99,15 @@ Config files has an editor for each file of the include tree.
 The page lists every `window-rule` in the order niri reads them, across include files. A
 rule's name is the first line of the `//` comment right above it.
 
+- Renaming changes only that first line; any explanation on the lines below stays.
+- Clearing the name deletes the line when it is the whole comment. When more lines follow,
+  it becomes a bare `//`, which means "no name", so the explanation is kept and does not
+  turn into the name.
+- A rule with no name is titled by its first app-id or title regex, or "All windows" when
+  it matches everything.
+- Leave a blank line between a section header comment and the first rule below it;
+  otherwise the header is read as that rule's name.
+
 - Rules are edited as a whole list. Each change splices only the lines that changed, so
   comments, raw-string regexes (`r#"…"#`) and one-line rules stay as written. A moved
   rule is written back exactly as it was.
