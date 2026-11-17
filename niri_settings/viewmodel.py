@@ -813,6 +813,70 @@ class Backend(QObject):
         names += [p[len("output["):-1] for p in self.config.tree.list("") if p.startswith("output[")]
         return sorted(set(names))
 
+    # suggestions for output and workspace names (rules, tablet and touch mapping)
+
+    def _output_suggestions(self, refresh: bool) -> list[dict]:
+        if refresh and self._version:
+            self._outputs = ipc.outputs() or self._outputs     # monitors may have been plugged in since
+        # A connected monitor can be named two ways, so it may get two rows:
+        # by port (`by: "port"`) and by make, model and serial (`by: "monitor"`).
+        # Both rows share `group`, which the list uses to colour them alike.
+        out, seen = [], set()
+        for group, (name, info) in enumerate(sorted(self._outputs.items())):
+            make, model, serial = (str(info.get(k) or "").strip() for k in ("make", "model", "serial"))
+            desc = " ".join(x for x in (make, model) if x) or "connected"
+            out.append({"value": name, "note": f"{desc} · by port", "group": group, "by": "port",
+                        "match": f"{name} {desc}"})
+            seen.add(name.lower())
+            if make and model and serial and "unknown" not in serial.lower():
+                full = f"{make} {model} {serial}"
+                out.append({"value": full, "note": f"same monitor as {name} · by make, model and serial",
+                            "group": group, "by": "monitor", "match": full})
+                seen.add(full.lower())
+        for p in self.config.tree.list(""):
+            if p.startswith("output[") and p[len("output["):-1].lower() not in seen:
+                name = p[len("output["):-1]
+                out.append({"value": name, "note": "in your config, not connected", "group": -1, "by": "",
+                            "match": name})
+                seen.add(name.lower())
+        return out
+
+    def _workspace_suggestions(self) -> list[dict]:
+        return [{"value": w["name"], "note": f"named workspace on {w['output']}" if w["output"] else "named workspace",
+                 "group": -1, "by": "", "match": w["name"]}
+                for w in self.workspaces]
+
+    @Slot(str, result="QVariantList")
+    def suggestions(self, kind):
+        """Names a field can take: {value, note, group, by, match}. `kind` is a schema's `suggest`;
+        typing filters on `match`, so words in the note do not."""
+        if kind == "outputs":
+            return self._output_suggestions(refresh=True)
+        if kind == "workspaces":
+            return self._workspace_suggestions()
+        return []
+
+    @Slot(str, str, result=str)
+    def suggestionNote(self, kind, value):
+        """A warning when a name matches nothing niri knows of, or "" when it does."""
+        value = str(value or "").strip()
+        if not value or kind not in ("outputs", "workspaces"):
+            return ""
+        if kind == "outputs":
+            if not self._version:
+                return ""    # offline: we cannot tell which outputs exist
+            known = [s["value"] for s in self._output_suggestions(refresh=False)]
+            if any(k.lower() == value.lower() for k in known):    # niri ignores case here
+                return ""
+            return "No connected or configured output has this name; niri then uses the usual output."
+        known = [s["value"] for s in self._workspace_suggestions()]
+        if value in known:
+            return ""
+        same = [k for k in known if k.lower() == value.lower()]
+        if same:
+            return f"The named workspace is written “{same[0]}”."
+        return "No named workspace has this name; niri then opens the window on the focused workspace."
+
     # startup commands
 
     @Slot(str, result="QVariantList")

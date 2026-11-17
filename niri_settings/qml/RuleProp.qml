@@ -57,17 +57,28 @@ Rectangle {
             // float, text, color
             Field {
                 id: textField
-                visible: ["float", "text", "color"].indexOf(row.item.kind) >= 0
+                visible: ["float", "text", "color"].indexOf(row.item.kind) >= 0 && !row.item.suggest
                 implicitWidth: row.item.kind === "float" ? 80 : 160
                 font.family: Theme.mono
                 font.pixelSize: Theme.config
                 text: visible ? String(row.item.text === undefined ? "" : (row.item.kind === "float" ? row.item.text : row.item.value)) : ""
-                placeholderText: row.item.path === "open-on-output" ? "DP-1" : row.item.path === "open-on-workspace" ? "name" : ""
                 Accessible.name: row.item.label
                 onEditingFinished: {
                     var current = row.item.kind === "float" ? row.item.text : row.item.value
                     if (text !== String(current)) row.edited(text)
                 }
+            }
+            // output or workspace name, with a list of the ones niri knows
+            SuggestField {
+                visible: row.item.kind === "text" && !!row.item.suggest
+                implicitWidth: 200
+                font.family: Theme.mono
+                font.pixelSize: Theme.config
+                kind: row.item.suggest || ""
+                stored: visible ? String(row.item.value || "") : ""
+                placeholderText: kind === "outputs" ? "DP-1" : "name"
+                Accessible.name: row.item.label
+                onCommitted: v => row.edited(v)
             }
             ColorSwatch {
                 visible: row.item.kind === "color"
@@ -185,11 +196,13 @@ Rectangle {
             onEdited: function(value) { row.edited(value) }
         }
 
-        // e.g. a colour that a gradient in the same block wins over
+        // e.g. a colour that a gradient in the same block wins over, or an unknown output
         Text {
-            visible: !!row.item.note
+            readonly property string unknown: row.item.suggest
+                ? backend.suggestionNote(row.item.suggest, String(row.item.value || "")) : ""
+            visible: text !== ""
             Layout.fillWidth: true
-            text: row.item.note || ""
+            text: [row.item.note || "", unknown].filter(function (t) { return t }).join(". ")
             wrapMode: Text.Wrap
             font.pixelSize: Theme.secondary
             color: Theme.muted

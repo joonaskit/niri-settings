@@ -358,5 +358,67 @@ class LayoutColors(Base):
         self.assertTrue(b.isOn("layout/border", False))
 
 
+class Suggestions(Base):
+    """Output and workspace names offered by open-on-output, map-to-output and open-on-workspace."""
+
+    MONITOR = {"HDMI-A-1": {"name": "HDMI-A-1", "make": "Samsung Electric Company", "model": "C32HG7x",
+                            "serial": "HTRK300541"},
+               "eDP-1": {"name": "eDP-1", "make": "BOE", "model": "0x0BCA", "serial": "Unknown"}}
+
+    def connect(self, b):
+        """Pretend niri is running with these monitors."""
+        from unittest import mock
+        b._version = "26.04"
+        patch = mock.patch("niri_settings.ipc.outputs", return_value=dict(self.MONITOR))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_outputs_from_niri_and_the_config(self):
+        b = self.load()
+        self.connect(b)
+        rows = b.suggestions("outputs")
+        got = {s["value"]: s["note"] for s in rows}
+        self.assertEqual(got["HDMI-A-1"], "Samsung Electric Company C32HG7x · by port")
+        self.assertEqual(got["Samsung Electric Company C32HG7x HTRK300541"],
+                         "same monitor as HDMI-A-1 · by make, model and serial")
+        self.assertNotIn("BOE 0x0BCA Unknown", got)                    # no real serial: by port only
+        self.assertEqual(got["eDP-1"], "BOE 0x0BCA · by port")
+        # both names of one monitor share a group, which the list colours alike
+        groups = {s["value"]: (s["group"], s["by"]) for s in rows}
+        self.assertEqual(groups["HDMI-A-1"][0], groups["Samsung Electric Company C32HG7x HTRK300541"][0])
+        self.assertNotEqual(groups["HDMI-A-1"][0], groups["eDP-1"][0])
+        self.assertEqual(groups["Samsung Electric Company C32HG7x HTRK300541"][1], "monitor")
+        self.cfg.set("output[DP-3]/scale", 2)
+        got = {s["value"]: (s["note"], s["group"]) for s in b.suggestions("outputs")}
+        self.assertEqual(got["DP-3"], ("in your config, not connected", -1))
+
+    def test_unknown_output_gets_a_note(self):
+        b = self.load()
+        self.assertEqual(b.suggestionNote("outputs", "DP-9"), "")      # offline: cannot tell
+        self.connect(b)
+        b.suggestions("outputs")
+        self.assertEqual(b.suggestionNote("outputs", "hdmi-a-1"), "")  # niri ignores case
+        self.assertEqual(b.suggestionNote("outputs", "samsung electric company c32hg7x htrk300541"), "")
+        self.assertIn("No connected or configured output", b.suggestionNote("outputs", "DP-9"))
+        self.assertEqual(b.suggestionNote("outputs", ""), "")
+
+    def test_named_workspaces(self):
+        b = self.load()
+        self.assertEqual(b.suggestions("workspaces"), [])
+        self.assertEqual(b.addWorkspace("chat"), "")
+        b.setWorkspaceOutput("chat", "HDMI-A-1")
+        self.assertEqual(b.suggestions("workspaces"),
+                         [{"value": "chat", "note": "named workspace on HDMI-A-1", "group": -1, "by": "",
+                           "match": "chat"}])
+        self.assertEqual(b.suggestionNote("workspaces", "chat"), "")
+        self.assertEqual(b.suggestionNote("workspaces", "Chat"), "The named workspace is written “chat”.")
+        self.assertIn("No named workspace", b.suggestionNote("workspaces", "mail"))
+
+    def test_schema_marks_the_name_fields(self):
+        from niri_settings.schema import window_rules
+        self.assertEqual(window_rules.PROP_PATHS["open-on-output"]["suggest"], "outputs")
+        self.assertEqual(window_rules.PROP_PATHS["open-on-workspace"]["suggest"], "workspaces")
+
+
 if __name__ == "__main__":
     unittest.main()

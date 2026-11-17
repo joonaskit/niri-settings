@@ -362,6 +362,15 @@ Card {
                     color: Theme.muted
                 }
             }
+            Text {
+                readonly property string unknown: card.setting.suggest ? backend.suggestionNote(card.setting.suggest, tk.stored) : ""
+                Layout.fillWidth: true
+                visible: unknown !== ""
+                text: unknown
+                wrapMode: Text.Wrap
+                font.pixelSize: Theme.hint
+                color: Theme.warnText
+            }
             Hint { plain: card.setting.hint || ""; visible: plain !== "" }
             SourceHint {}
         }
@@ -416,7 +425,19 @@ Card {
             Title { text: card.setting.label; Layout.fillWidth: true }
             RowLayout {
                 spacing: 8
+                SuggestField {
+                    visible: !!card.setting.suggest
+                    Layout.fillWidth: true
+                    font.family: Theme.mono
+                    font.pixelSize: Theme.config
+                    kind: card.setting.suggest || ""
+                    stored: tk.stored
+                    placeholderText: "niri default"
+                    Accessible.name: card.setting.label
+                    onCommitted: v => backend.setText(card.path, v)
+                }
                 Field {
+                    visible: !card.setting.suggest
                     Layout.fillWidth: true
                     font.family: Theme.mono
                     font.pixelSize: Theme.config
