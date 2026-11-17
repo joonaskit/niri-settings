@@ -47,7 +47,11 @@ Config files page.
 
 ```
 python3 -m unittest discover -s tests -t .
+ruff check niri_settings tests
 ```
+
+CI runs both on every pull request. Releases are cut with `scripts/release.sh`; see
+`packaging/README.md`.
 
 ## Displays
 

@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass
 
 from . import niri_core
-from .schema import layer_rules as LAYER
+from .schema import layer_rules as LAYER  # noqa: F401  (re-exported: config.py uses rules.LAYER)
 from .schema import window_rules as WINDOW
 
 try:

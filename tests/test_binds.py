@@ -6,8 +6,7 @@ import unittest
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, Signal
 
-from niri_settings import keymap as km
-from niri_settings.binds import (BindsModel, action_text, layer_label, parse_action, parse_combo, role,
+from niri_settings.binds import (BindsModel, action_text, parse_action, parse_combo, role,
                        short_label)
 from niri_settings.binds_view import BindsView
 from niri_settings.config import MANAGED, Config, ReadOnlyError

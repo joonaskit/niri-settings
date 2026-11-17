@@ -1,0 +1,49 @@
+name: Release
+
+# Runs when scripts/release.sh pushes a v<version> tag.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - name: Install build tools
+        run: >
+          dnf -y install --setopt=install_weak_deps=False
+          git gh make rpm-build python3-devel python3-setuptools python3-build
+          pyproject-rpm-macros "dnf-command(builddep)"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the tag matches the version
+        run: |
+          version=$(sed -n 's/^Version:[[:space:]]*//p' packaging/niri-settings.spec)
+          test "v$version" = "$GITHUB_REF_NAME" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match spec version $version"; exit 1; }
+      - name: Build sdist and wheel
+        run: python3 -m build --no-isolation --outdir dist .
+      - name: Build source and binary RPM
+        # rpmbuild runs %check: the whole test suite against the packaged niri.
+        run: |
+          make -f .copr/Makefile srpm outdir="$PWD/dist"
+          dnf -y builddep dist/*.src.rpm
+          # %generate_buildrequires adds more (pip, regex): resolve and install those too.
+          rpmbuild -rr dist/*.src.rpm --define "_srcrpmdir $PWD/br" || true
+          dnf -y builddep br/*.buildreqs.nosrc.rpm
+          rpmbuild --rebuild dist/*.src.rpm --define "_rpmdir $PWD/rpms"
+          mv rpms/noarch/*.rpm dist/
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global --add safe.directory "$PWD"
+          notes=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "niri settings ${GITHUB_REF_NAME#v}" \
+            --notes "$notes" --generate-notes --verify-tag

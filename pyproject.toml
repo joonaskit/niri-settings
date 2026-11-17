@@ -36,3 +36,11 @@ packages = ["niri_settings", "niri_settings.schema"]
 
 [tool.setuptools.package-data]
 niri_settings = ["qml/*.qml", "qml/qmldir", "fonts/*.woff2", "fonts/*.txt", "fonts/*.md"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# Errors only: undefined names, unused imports, syntax errors. CI runs this.
+select = ["F", "E9"]
