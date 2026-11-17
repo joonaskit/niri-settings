@@ -17,14 +17,35 @@ from PySide6.QtQml import QJSValue
 from . import ipc, niri_core
 from . import rules as rl
 from .rules import RulesModel
+from .schema.window_rules import GRADIENT_RELATIVE, GRADIENT_SPACES
 
 _SIZE_KINDS = [{"label": "proportion", "value": "proportion"}, {"label": "fixed px", "value": "fixed"},
                {"label": "app decides", "value": ""}]
-_WIDE = {"size", "position", "kdl", "xy"}
+_WIDE = {"size", "position", "kdl", "xy", "gradient"}
+_GRADIENT_KEYS = {"from", "to", "angle", "relative-to", "in"}
 
 
 def _options(values) -> list[dict]:
     return [{"label": v, "value": v} for v in values]
+
+
+def _gradient_props(value: dict) -> dict:
+    """niri's props for a gradient, leaving out what niri does by default."""
+    start, end = str(value.get("from", "")).strip(), str(value.get("to", "")).strip()
+    if not start or not end:
+        raise ValueError("A gradient needs a from and a to colour")
+    try:
+        angle = _number(value.get("angle", 180), "int")    # niri takes whole degrees only
+    except (TypeError, ValueError):
+        raise ValueError("The gradient angle needs a whole number of degrees")
+    props = {"from": start, "to": end}
+    if angle != 180:
+        props["angle"] = angle
+    if value.get("rel", "window") != "window":
+        props["relative-to"] = value["rel"]
+    if value.get("in", "srgb") != "srgb":
+        props["in"] = value["in"]
+    return props
 
 
 def _number(text, kind: str):
@@ -263,6 +284,18 @@ class RuleListView(QObject):
                 item["rel"] = props.get("relative-to", "top-left")
                 if kind == "position":
                     item["options"] = _options(known["options"])
+            elif kind == "gradient":
+                angle = props.get("angle", 180)
+                if (args or kids or set(props) - _GRADIENT_KEYS or not {"from", "to"} <= set(props)
+                        or isinstance(angle, bool) or not isinstance(angle, int)):
+                    raise TypeError
+                rel, space = str(props.get("relative-to", "window")), str(props.get("in", "srgb"))
+                if rel not in GRADIENT_RELATIVE or space not in GRADIENT_SPACES:
+                    raise TypeError
+                item["value"] = {"from": str(props["from"]), "to": str(props["to"]), "angle": angle,
+                                 "rel": rel, "in": space}
+                item["relOptions"] = _options(GRADIENT_RELATIVE)
+                item["inOptions"] = _options(GRADIENT_SPACES)
         except (TypeError, IndexError, KeyError):
             kind = "kdl"
         item["kind"] = kind
@@ -302,6 +335,11 @@ class RuleListView(QObject):
             f = self._facts().get(self._target) if self._target is not None else None
             items = [self._prop_item(p, n) for p, n in rl.leaves(rule.get("children", []), kind=self.kind)]
             used = {it["path"] for it in items}
+            beaten = {self.kind.PROP_PATHS[it["path"]]["overrides"]: it["label"] for it in items
+                      if it["path"] in self.kind.PROP_PATHS and "overrides" in self.kind.PROP_PATHS[it["path"]]}
+            for it in items:
+                if it["path"] in beaten:
+                    it["note"] = f"{beaten[it['path']]} wins over this"
             addable = [{"label": ("At open: " if p["when"] == "open" else "") + p["label"], "value": p["path"]}
                        for p in self.kind.PROPS if p["path"] not in used]
             text = src["text"]
@@ -438,6 +476,8 @@ class RuleListView(QObject):
             if kind == "position" and value.get("rel", "top-left") != "top-left":
                 props["relative-to"] = value["rel"]
             return {"args": [], "props": props}
+        if kind == "gradient":
+            return {"args": [], "props": _gradient_props(value)}
         text = str(value).strip()
         name = path.rsplit("/", 1)[-1]
         try:
