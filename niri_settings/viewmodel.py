@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shlex
 import time
@@ -87,6 +88,7 @@ class Backend(QObject):
         self._block = ""
         self._version = ipc.version() if live else None
         self._outputs = ipc.outputs() if self._version else {}
+        self._output_names: set | None = None    # outputs seen on workspaces at the last refresh
         self.state = ipc.NiriState()
         self._stream = None
 
@@ -138,7 +140,10 @@ class Backend(QObject):
             # change event tries again, and Save stays blocked meanwhile.
             self._notice = f"The file on disk does not parse yet ({os.path.basename(e.file)}:{e.line})"
         else:
-            if conflicts:
+            if self.config.dropped:
+                self._notice = "Reloaded an outside edit; some unsaved changes could not be kept: " \
+                    + " ".join(self.config.dropped)
+            elif conflicts:
                 self._notice = ""
             elif had_pending:
                 self._notice = "Reloaded an outside edit; your unsaved changes were kept"
@@ -599,6 +604,8 @@ class Backend(QObject):
             number = float(str(value).strip().replace(",", "."))
         except ValueError:
             return
+        if not math.isfinite(number):
+            return
         if self.config.get(path) != number:
             self._apply_edit(lambda: self.config.set(path, number))
 
@@ -619,6 +626,8 @@ class Backend(QObject):
         try:
             numbers = [float(x) for x in text.replace(",", " ").split()]
         except ValueError:
+            return "Type numbers separated by spaces"
+        if not all(math.isfinite(n) for n in numbers):
             return "Type numbers separated by spaces"
         value = {"args": numbers, "props": {}}
         if self.config.get(path) != value:
@@ -817,7 +826,12 @@ class Backend(QObject):
 
     def _output_suggestions(self, refresh: bool) -> list[dict]:
         if refresh and self._version:
-            self._outputs = ipc.outputs() or self._outputs     # monitors may have been plugged in since
+            # Ask niri again only when a monitor came or went since the last
+            # time: every output has workspaces, so the event stream shows it.
+            names = {w.get("output") for w in self.state.workspaces.values()} - {None}
+            if names != self._output_names:
+                self._outputs = ipc.outputs() or self._outputs
+                self._output_names = names
         # A connected monitor can be named two ways, so it may get two rows:
         # by port (`by: "port"`) and by make, model and serial (`by: "monitor"`).
         # Both rows share `group`, which the list uses to colour them alike.

@@ -420,5 +420,116 @@ class Suggestions(Base):
         self.assertEqual(window_rules.PROP_PATHS["open-on-workspace"]["suggest"], "workspaces")
 
 
+
+class ReviewFixes(Base):
+    """Bugs found in the whole-project review."""
+
+    def write(self, name, text):
+        with open(os.path.join(self.tmp, "niri", name), "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    def test_a_workspace_name_with_a_slash(self):
+        b = self.load()
+        self.assertEqual(b.addWorkspace("web/dev"), "")
+        self.assertIn('workspace "web/dev"', self.text())
+        self.assertEqual([w["name"] for w in b.workspaces], ["web/dev"])
+        b.setWorkspaceOutput("web/dev", "DP-1")
+        self.assertEqual(self.cfg.get("workspace[web/dev]/open-on-output"), "DP-1")
+        self.assert_valid()
+
+    def test_a_bad_unicode_escape_is_a_parse_error(self):
+        b = self.load()
+        result = b.setFileText(self.main, self.text() + 'environment { X "\\u{zz}"; }\n')
+        self.assertIn("escape", result["error"])
+        with self.assertRaises(niri_core.KdlError):
+            niri_core.load_string('a "\\u{110000}"')
+
+    def test_infinite_numbers_are_refused(self):
+        b = self.load()
+        before = self.text()
+        b.setDecimal("layout/gaps", "inf")
+        b.setDecimal("layout/gaps", "nan")
+        self.assertNotEqual(b.setNumbers("input/touchpad/calibration-matrix", "1 inf 0"), "")
+        self.assertEqual(self.text(), before)
+        from niri_settings import gradients
+        with self.assertRaises(ValueError):
+            gradients.props_of({"from": "red", "to": "blue", "angle": "inf"})
+        with self.assertRaises(ValueError):
+            niri_core.format_value(float("inf"))
+
+    def test_a_missing_include_changes_nothing(self):
+        self.load()
+        before, files = self.text(), self.cfg.tree.files()
+        with self.assertRaises(niri_core.KdlError):
+            self.cfg.tree.set_text(self.main, before + 'include "nowhere.kdl"\n')
+        self.assertEqual(self.text(), before)
+        self.assertEqual(self.cfg.tree.files(), files)
+
+    def test_on_and_off_follow_the_include_position(self):
+        self.load()
+        self.write("colors.kdl", "layout { border { off; }; }\n")
+        self.write("config.kdl", 'include "colors.kdl"\nlayout { border { on; }; }\n')
+        self.cfg.reload()
+        self.assertTrue(self.cfg.is_on("layout/border", False))
+        self.write("config.kdl", 'layout { border { on; }; }\ninclude "colors.kdl"\n')
+        self.cfg.reload()
+        self.assertFalse(self.cfg.is_on("layout/border", False))
+
+    def test_absolute_includes_are_staged(self):
+        text = niri_core.retarget_includes('include "/etc/a.kdl"\ninclude "b.kdl"\nlayout {}\n',
+                                           "/home/u/config.kdl",
+                                           {"/etc/a.kdl": "/tmp/x/etc/a.kdl", "/home/u/b.kdl": "/tmp/x/b.kdl"})
+        self.assertEqual(text, 'include "/tmp/x/etc/a.kdl"\ninclude "/tmp/x/b.kdl"\nlayout {}\n')
+
+    @unittest.skipUnless(HAVE_NIRI, "niri is not installed")
+    def test_a_bad_edit_in_an_absolute_include_fails_validation(self):
+        self.load()
+        other = os.path.join(self.tmp, "elsewhere", "extra.kdl")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w", encoding="utf-8") as fh:
+            fh.write("layout { gaps 4; }\n")
+        self.write("config.kdl", self.text() + f'include "{other}"\n')
+        self.cfg.reload()
+        self.cfg.set_text(other, "layout { gaps \"wide\"; }\n")
+        ok, _ = self.cfg.validate()
+        self.assertFalse(ok)
+
+    def test_rebase_keeps_going_when_a_change_cannot_be_redone(self):
+        from unittest import mock
+        self.load()
+        self.cfg.set("layout/gaps", 7)
+        self.cfg.set("layout/struts/left", 9)
+        self.write("config.kdl", self.cfg.tree.original(self.main) + "\n// edited\n")
+        calls = []
+
+        def refuse(path, value):
+            calls.append(path)
+            raise ReadOnlyError(f"cannot redo {path}")
+        with mock.patch.object(self.cfg, "_apply", side_effect=refuse):
+            self.assertEqual(self.cfg.rebase(), [])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(self.cfg.dropped), 2)
+
+    def test_a_file_no_longer_included_has_no_paths(self):
+        self.load(INCLUDES)
+        colors = os.path.join(self.tmp, "niri", "colors.kdl")
+        self.assertEqual(self.cfg.tree.path_at(colors, 6), "window-rule#0")
+        self.cfg.set_text(self.main, self.text().replace('include "colors.kdl"\n', ""))
+        self.assertIsNone(self.cfg.tree.path_at(colors, 6))
+        self.assertEqual(self.backend.pathAt(colors, 6)["path"], "")
+
+    def test_outputs_are_asked_again_only_after_a_monitor_change(self):
+        from unittest import mock
+        b = self.load()
+        b._version = "26.04"
+        with mock.patch("niri_settings.ipc.outputs", return_value={}) as outputs:
+            b.suggestions("outputs")
+            b.suggestions("outputs")
+            self.assertEqual(outputs.call_count, 1)
+            b.state.workspaces = {1: {"id": 1, "output": "HDMI-A-1"}}
+            b.suggestions("outputs")
+            self.assertEqual(outputs.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,8 @@ one node, with niri's defaults left out.
 
 from __future__ import annotations
 
+import math
+
 # Colour spaces a gradient can blend through (`in=`); srgb is niri's default.
 SPACES = ["srgb", "srgb-linear", "oklab", "oklch shorter hue", "oklch longer hue",
           "oklch increasing hue", "oklch decreasing hue"]
@@ -46,7 +48,7 @@ def props_of(value: dict) -> dict:
         number = float(str(value.get("angle", 180)).strip().replace(",", "."))
     except ValueError:
         number = None
-    if number is None or number != int(number):          # niri takes whole degrees only
+    if number is None or not math.isfinite(number) or number != int(number):   # whole degrees only
         raise ValueError("The gradient angle needs a whole number of degrees")
     props = {"from": start, "to": end}
     if int(number) != 180:
