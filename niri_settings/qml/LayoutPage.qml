@@ -15,6 +15,14 @@ ScrollView {
         var v = backend.value(path)
         return v === undefined || v === null ? fallback : Number(v)
     }
+    // The colour niri draws for a state: its gradient's start, else its colour.
+    function look(path, state, fallback) {
+        rev
+        var g = backend.value(path + "/" + state + "-gradient")
+        if (g && g.props && g.props.from) return Theme.cssColor(String(g.props.from))
+        var c = backend.value(path + "/" + state + "-color")
+        return Theme.cssColor(typeof c === "string" && c ? c : fallback)
+    }
     readonly property var overrides: { rev; return backend.layoutOverrides() }
     readonly property var shown: backend.layoutSettings.filter(function (s) {
         var q = page.filter.trim().toLowerCase()
@@ -70,6 +78,9 @@ ScrollView {
                     ringOn: { page.rev; return backend.isOn("layout/focus-ring", true) }
                     borderWidth: page.num("layout/border/width", 4)
                     borderOn: { page.rev; return backend.isOn("layout/border", false) }
+                    ringColor: page.look("layout/focus-ring", "active", "#7fc8ff")
+                    borderActive: page.look("layout/border", "active", "#ffc87f")
+                    borderInactive: page.look("layout/border", "inactive", "#505050")
                     center: { page.rev; return String(backend.value("layout/center-focused-column") || "never") }
                 }
                 Text {

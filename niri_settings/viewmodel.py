@@ -7,8 +7,9 @@ import shlex
 import time
 
 from PySide6.QtCore import (Property, QFileSystemWatcher, QObject, QTimer, Signal, Slot)
+from PySide6.QtQml import QJSValue
 
-from . import ipc, niri_core
+from . import gradients, ipc, niri_core
 from .config import FILE, MANAGED, RULES, Config, ReadOnlyError
 from .schema import layout as layout_schema
 from .schema import pages as page_schema
@@ -27,6 +28,15 @@ SECTIONS = [
 ]
 
 SAMPLE_COLUMNS = [("Terminal", 1 / 3), ("Firefox", None), ("Editor", None), ("Files", 1 / 3)]
+
+
+def _props_text(node) -> str:
+    """A node's arguments and props as written after its name."""
+    if not isinstance(node, dict):
+        return niri_core.format_value(node)
+    parts = [niri_core.format_value(a) for a in node.get("args", [])]
+    parts += [f"{k}={niri_core.format_value(v)}" for k, v in node.get("props", {}).items()]
+    return " ".join(parts)
 
 
 def _show(value) -> str:
@@ -432,19 +442,7 @@ class Backend(QObject):
     @Slot(str, bool, result=bool)
     def isOn(self, path, default):
         """Whether a section with on/off flags (focus-ring, border) is enabled."""
-        cfg = self.config
-        if cfg.get(path + "/off") is not None:
-            # A later `on` beats an earlier `off`, and the other way round.
-            on, off = cfg.source(path + "/on"), cfg.source(path + "/off")
-            order = cfg.tree.files()
-            return bool(on) and ((order.index(on["file"]), on["line"])
-                                 > (order.index(off["file"]), off["line"]))
-        if cfg.get(path + "/on") is not None:
-            return True
-        if cfg.get(path) is not None and path == "layout/border":
-            # Historic special case: a border section in the main file enables it.
-            return cfg.source(path)["file"] == cfg.main
-        return default
+        return self.config.is_on(path, default)
 
     @Slot(str, bool, bool)
     def setOn(self, path, on, default):
@@ -661,6 +659,53 @@ class Backend(QObject):
         v = self.config.get(path)
         props = v.get("props", {}) if isinstance(v, dict) else {}
         return [props.get("x"), props.get("y")] if props else []
+
+    # colours and gradients of focus-ring, border and tab-indicator
+
+    @Slot(str, "QVariant", result="QVariantList")
+    def blockColors(self, path, defaults):
+        """Active, inactive and urgent: each colour, and its gradient if one is set.
+
+        `gradient` is empty when there is none; `kdl` holds a gradient the
+        editor cannot show (unknown props, a fractional angle).
+        """
+        if isinstance(defaults, QJSValue):
+            defaults = defaults.toVariant()
+        defaults = dict(defaults or {})
+        out = []
+        for state in gradients.STATES:
+            cpath, gpath = f"{path}/{state}-color", f"{path}/{state}-gradient"
+            color = self.config.get(cpath)
+            node = self.config.get(gpath)
+            value = gradients.read(node) if node is not None else None
+            out.append({"state": state, "label": state.capitalize(),
+                        "colorPath": cpath, "gradientPath": gpath,
+                        "color": color if isinstance(color, str) else "",
+                        "fallback": defaults.get(state, ""),
+                        "gradient": value or {},
+                        "kdl": "" if node is None or value else _props_text(node)})
+        return out
+
+    @Property("QVariantMap", constant=True)
+    def gradientOptions(self):
+        return {"rel": gradients.options(gradients.RELATIVE), "in": gradients.options(gradients.SPACES)}
+
+    @Slot(str, result="QVariantMap")
+    def gradientDefault(self, state):
+        return gradients.default(state)
+
+    @Slot(str, "QVariant", result=str)
+    def setGradient(self, path, value):
+        """Write a gradient. Returns an error for the user, or ""."""
+        if isinstance(value, QJSValue):
+            value = value.toVariant()
+        try:
+            node = {"args": [], "props": gradients.props_of(dict(value))}
+        except ValueError as e:
+            return str(e)
+        if self.config.get(path) != node:
+            self._apply_edit(lambda: self.config.set(path, node))
+        return ""
 
     @Slot(str, result="QVariant")
     def text(self, path):
