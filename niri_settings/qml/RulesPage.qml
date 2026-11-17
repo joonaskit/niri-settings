@@ -9,6 +9,7 @@ import "."
 Item {
     id: page
     required property var view
+    signal openPage(string id)
     readonly property var detail: page.view.detail
     readonly property var why: page.view.why
     readonly property var words: page.view.words
@@ -323,6 +324,22 @@ Item {
                                 color: Theme.muted
                                 text: "No match line: this rule applies to every " + page.words.one
                                       + ((page.detail.directives || []).length ? ", except the ones below." : ".")
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: !!page.detail.globalNote
+                                spacing: 8
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: Theme.secondary
+                                    color: Theme.muted
+                                    text: page.detail.globalNote || ""
+                                }
+                                LinkButton {
+                                    text: "Open Layout"
+                                    onClicked: page.openPage("layout")
+                                }
                             }
                             Repeater {
                                 model: page.detail.directives || []

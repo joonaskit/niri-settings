@@ -8,16 +8,18 @@ version a key arrived in. Kinds:
   onoff      a section with `off` / `on` children (focus-ring, border)
   widths     default-column-width, chosen from preset-column-widths
   struts     four numbers under `path`
+  colors     active-, inactive- and urgent-color under `path`, each with an
+             optional gradient that wins over the colour
 """
 
 SETTINGS = [
     {"kind": "slider", "path": "layout/gaps", "label": "Gaps",
      "min": 0, "max": 48, "unit": "px", "default": 16},
     {"kind": "slider", "path": "layout/focus-ring/width", "label": "Focus ring width",
-     "min": 0, "max": 12, "unit": "px", "default": 4,
-     "swatches": [["Active", "layout/focus-ring/active-color", "#7fc8ff"],
-                  ["Inactive", "layout/focus-ring/inactive-color", "#505050"],
-                  ["Urgent", "layout/focus-ring/urgent-color", "#9b0000"]]},
+     "min": 0, "max": 12, "unit": "px", "default": 4},
+    {"kind": "colors", "path": "layout/focus-ring", "label": "Focus ring colors",
+     "defaults": {"active": "#7fc8ff", "inactive": "#505050", "urgent": "#9b0000"},
+     "hint": "Inactive shows on other monitors only: the ring is drawn around the focused window."},
     {"kind": "segmented", "path": "layout/center-focused-column",
      "label": "Center focused column",
      "options": ["never", "on-overflow", "always"], "default": "never"},
@@ -30,10 +32,9 @@ SETTINGS = [
     {"kind": "onoff", "path": "layout/border", "label": "Window border",
      "default": False, "hint": "Drawn inside the gaps, unlike the focus ring"},
     {"kind": "slider", "path": "layout/border/width", "label": "Border width",
-     "min": 0, "max": 12, "unit": "px", "default": 4,
-     "swatches": [["Active", "layout/border/active-color", "#ffc87f"],
-                  ["Inactive", "layout/border/inactive-color", "#505050"],
-                  ["Urgent", "layout/border/urgent-color", "#9b0000"]]},
+     "min": 0, "max": 12, "unit": "px", "default": 4},
+    {"kind": "colors", "path": "layout/border", "label": "Border colors",
+     "defaults": {"active": "#ffc87f", "inactive": "#505050", "urgent": "#9b0000"}},
     {"kind": "struts", "path": "layout/struts", "label": "Struts",
      "sides": ["left", "right", "top", "bottom"], "min": -64, "max": 256,
      "hint": "Reserve space at the screen edges, like outer gaps."},

@@ -211,8 +211,8 @@ ApplicationWindow {
             }
             Component { id: displaysPage; DisplaysPage {} }
             Component { id: bindsPage; KeyBindingsPage {} }
-            Component { id: rulesPage; RulesPage { view: rules } }
-            Component { id: layerRulesPage; RulesPage { view: layerRules } }
+            Component { id: rulesPage; RulesPage { view: rules; onOpenPage: id => window.go(id) } }
+            Component { id: layerRulesPage; RulesPage { view: layerRules; onOpenPage: id => window.go(id) } }
             Component { id: placeholder; PlaceholderPage { title: window.currentTitle } }
         }
 

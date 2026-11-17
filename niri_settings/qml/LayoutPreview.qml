@@ -11,6 +11,9 @@ Rectangle {
     property bool ringOn: true
     property real borderWidth: 4
     property bool borderOn: false
+    property color ringColor: Theme.accent
+    property color borderActive: "#ffc87f"
+    property color borderInactive: "#505050"
     property string center: "never"
 
     implicitWidth: 560
@@ -69,7 +72,7 @@ Rectangle {
                     anchors.fill: parent
                     anchors.margins: -root.ring
                     radius: Theme.radiusBlock + root.ring
-                    color: Theme.accent
+                    color: root.ringColor
                     visible: tile.it.focused && root.ringOn && root.ring > 0
                 }
                 Rectangle {
@@ -77,7 +80,7 @@ Rectangle {
                     radius: Theme.radiusBlock
                     color: tile.it.focused ? Theme.tileFocused : Theme.tile
                     border.width: root.borderOn ? Math.min(root.borderWidth, width / 2) : 0
-                    border.color: Theme.lineStrong
+                    border.color: tile.it.focused ? root.borderActive : root.borderInactive
                 }
                 Text {
                     anchors.fill: parent

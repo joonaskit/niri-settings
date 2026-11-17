@@ -28,7 +28,7 @@ Card {
                             widths: widths, struts: struts, number: number, decimal: decimal,
                             text: textKind, color: textKind, select: select, bool: boolKind,
                             offflag: offflag, xy: xy, animation: animation, workspaces: workspaces,
-                            startup: startup, environment: environment })[card.setting.kind]
+                            startup: startup, environment: environment, colors: colors })[card.setting.kind]
     }
     Text {  // niri's own message, on the setting that caused it
         Layout.fillWidth: true
@@ -111,27 +111,110 @@ Card {
                 onMoved: backend.setValue(card.path, value)
                 Accessible.name: card.setting.label
             }
-            Flow {
-                Layout.fillWidth: true
-                spacing: 8
-                visible: card.setting.swatches !== undefined
-                Repeater {
-                    model: card.setting.swatches || []
-                    Row {
-                        required property var modelData
-                        spacing: 6
+            SourceHint {}
+        }
+    }
+
+    // Active, inactive and urgent colour of a block, each with an optional
+    // gradient that wins over it. An empty colour field removes the colour.
+    Component {
+        id: colors
+        ColumnLayout {
+            id: cc
+            spacing: 10
+            readonly property var rows: { card.rev; return backend.blockColors(card.path, card.setting.defaults) }
+            Title { text: card.setting.label; Layout.fillWidth: true }
+            Hint { plain: card.setting.hint || ""; visible: !!card.setting.hint }
+            Repeater {
+                model: cc.rows
+                ColumnLayout {
+                    id: entry
+                    required property var modelData
+                    readonly property bool hasGradient: modelData.gradient.from !== undefined
+                    property string problem: ""
+                    Layout.fillWidth: true
+                    spacing: 6
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
                         Text {
-                            text: modelData[0]
-                            font.pixelSize: Theme.hint
-                            color: Theme.muted
-                            anchors.verticalCenter: parent.verticalCenter
+                            Layout.preferredWidth: 64
+                            text: entry.modelData.label
+                            font.pixelSize: Theme.secondary
+                            color: Theme.text
+                        }
+                        Field {
+                            Layout.preferredWidth: 130
+                            font.family: Theme.mono
+                            font.pixelSize: Theme.config
+                            text: entry.modelData.color
+                            placeholderText: entry.modelData.fallback
+                            Accessible.name: card.setting.label + " " + entry.modelData.state
+                            onEditingFinished: if (text !== entry.modelData.color)
+                                                   backend.setText(entry.modelData.colorPath, text.trim())
                         }
                         Rectangle {
-                            width: 18; height: 18; radius: 4
-                            color: Theme.cssColor(card.read(modelData[1], modelData[2]))
+                            implicitWidth: 18; implicitHeight: 18; radius: 4
+                            color: Theme.cssColor(entry.modelData.color || entry.modelData.fallback)
+                            opacity: entry.modelData.color ? 1 : 0.5
                             border.width: 1
-                            border.color: Theme.line
+                            border.color: Theme.lineStrong
+                            Accessible.ignored: true
                         }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: entry.hasGradient || entry.modelData.kdl !== ""
+                            text: "gradient wins"
+                            elide: Text.ElideRight
+                            Layout.minimumWidth: implicitWidth
+                            font.pixelSize: Theme.hint
+                            color: Theme.muted
+                        }
+                        Item { Layout.fillWidth: true; visible: !entry.hasGradient && entry.modelData.kdl === "" }
+                        LinkButton {
+                            text: entry.hasGradient || entry.modelData.kdl !== "" ? "Remove gradient" : "Add gradient"
+                            Accessible.name: text + " for " + card.setting.label + " " + entry.modelData.state
+                            onClicked: {
+                                entry.problem = ""
+                                if (entry.hasGradient || entry.modelData.kdl !== "")
+                                    backend.resetValue(entry.modelData.gradientPath)
+                                else
+                                    entry.problem = backend.setGradient(entry.modelData.gradientPath,
+                                                                        backend.gradientDefault(entry.modelData.state))
+                            }
+                        }
+                    }
+                    GradientField {
+                        visible: entry.hasGradient
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 72
+                        label: card.setting.label + " " + entry.modelData.state + " gradient"
+                        value: entry.modelData.gradient
+                        relOptions: backend.gradientOptions.rel
+                        inOptions: backend.gradientOptions["in"]
+                        onEdited: function(v) { entry.problem = backend.setGradient(entry.modelData.gradientPath, v) }
+                    }
+                    RowLayout {
+                        visible: entry.modelData.kdl !== ""
+                        Layout.leftMargin: 72
+                        spacing: 6
+                        Text {
+                            text: "gradient " + entry.modelData.kdl
+                            font.family: Theme.mono
+                            font.pixelSize: Theme.hint
+                            color: Theme.muted
+                        }
+                        LinkButton {
+                            text: "edit in source"
+                            onClicked: backend.showSource(entry.modelData.gradientPath)
+                        }
+                    }
+                    Text {
+                        visible: entry.problem !== ""
+                        Layout.leftMargin: 72
+                        text: "✕ " + entry.problem
+                        font.pixelSize: Theme.hint
+                        color: Theme.warnText
                     }
                 }
             }

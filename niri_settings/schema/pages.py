@@ -115,6 +115,9 @@ PAGES = {
                  "unit": "px", "min": 0, "max": 64, "default": 0},
                 {"kind": "number", "path": "layout/tab-indicator/corner-radius", "label": "Corner radius",
                  "unit": "px", "min": 0, "max": 64, "default": 0},
+                {"kind": "colors", "path": "layout/tab-indicator", "label": "Tab colors",
+                 "defaults": {"active": "#7fc8ff", "inactive": "#505050", "urgent": "#9b0000"},
+                 "hint": "Without colors set here, tabs use the focus ring's, or the border's when the ring is off."},
             ]},
             {"title": "Blur", "settings": [
                 {"kind": "offflag", "path": "blur", "label": "Blur", "default": True,

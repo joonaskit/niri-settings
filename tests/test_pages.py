@@ -66,7 +66,8 @@ class Schema(unittest.TestCase):
 
     def test_settings_are_well_formed(self):
         kinds = {"slider", "segmented", "flag", "onoff", "widths", "struts", "number", "decimal", "text",
-                 "color", "select", "bool", "offflag", "xy", "animation", "workspaces", "startup", "environment"}
+                 "color", "select", "bool", "offflag", "xy", "animation", "workspaces", "startup", "environment",
+                 "colors"}
         seen = set()
         for page_id, page in pages.PAGES.items():
             for group in page["groups"]:
@@ -307,6 +308,54 @@ class Formatting(unittest.TestCase):
     def test_top_level_node_without_block(self):
         self.assertEqual(niri_core.format_block("spawn-at-startup", {"args": ["a", "b"], "props": {}}),
                          'spawn-at-startup "a" "b"')
+
+
+class LayoutColors(Base):
+    """The colours cards of focus-ring, border and tab-indicator, with gradients."""
+
+    def rows(self, path="layout/focus-ring"):
+        return {r["state"]: r for r in self.backend.blockColors(path, {"urgent": "#9b0000"})}
+
+    def test_colours_are_read_and_written(self):
+        b = self.load()
+        rows = self.rows()
+        self.assertEqual(rows["active"]["color"], "#7fc8ff")
+        self.assertEqual(rows["urgent"]["color"], "")              # not set: niri's default
+        self.assertEqual(rows["urgent"]["fallback"], "#9b0000")
+        self.assertEqual(rows["active"]["gradient"], {})
+        b.setText("layout/focus-ring/active-color", "#000000")
+        self.assertIn('        active-color "#000000"\n', self.text())
+        b.setText("layout/focus-ring/active-color", "")             # empty: removed
+        self.assertIsNone(self.cfg.get("layout/focus-ring/active-color"))
+
+    def test_gradient_added_edited_and_removed(self):
+        b = self.load()
+        path = "layout/border/active-gradient"
+        self.assertEqual(b.setGradient(path, b.gradientDefault("active")), "")
+        self.assertIn('        active-gradient from="#80c8ff" to="#bbddff" angle=45\n', self.text())
+        self.assertEqual(self.rows("layout/border")["active"]["gradient"]["angle"], 45)
+        value = dict(b.gradientDefault("active"), angle=180, rel="workspace-view")
+        self.assertEqual(b.setGradient(path, value), "")
+        self.assertIn('active-gradient from="#80c8ff" to="#bbddff" relative-to="workspace-view"\n', self.text())
+        self.assertIn("whole number", b.setGradient(path, dict(value, angle="12.5")))
+        self.assert_valid()
+        b.resetValue(path)
+        self.assertIsNone(self.cfg.get(path))
+
+    def test_a_gradient_the_editor_cannot_show_is_listed_as_kdl(self):
+        self.load()
+        self.cfg.set("layout/tab-indicator/urgent-gradient",
+                     {"args": [], "props": {"from": "#800", "to": "#a33", "in": "hsl"}})
+        row = self.rows("layout/tab-indicator")["urgent"]
+        self.assertEqual(row["gradient"], {})
+        self.assertEqual(row["kdl"], 'from="#800" to="#a33" in="hsl"')
+
+    def test_is_on_moved_to_config(self):
+        b = self.load()
+        self.assertFalse(self.cfg.is_on("layout/border", False))      # `off` in the default config
+        self.assertTrue(self.cfg.is_on("layout/focus-ring", True))
+        b.setOn("layout/border", True, False)
+        self.assertTrue(b.isOn("layout/border", False))
 
 
 if __name__ == "__main__":
