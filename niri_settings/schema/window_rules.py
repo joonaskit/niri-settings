@@ -8,6 +8,7 @@ flags of a block. `kind` picks the editor:
     enum      one of `options`         text, color  a string
     onoff     the on / off flags       size         { proportion 0.5; } or { fixed 480; } or {}
     position  x= y= relative-to=       xy           x= y= (shadow offset)
+    gradient  from= to= angle= relative-to= in=
     kdl       anything else, edited as the KDL after the node name
 
 Matcher kinds: regex, bool, and enum (one of `options`).
@@ -43,7 +44,23 @@ def _ring(prefix: str, label: str, since: str = "") -> list[dict]:
         {"path": f"{prefix}/active-color", "label": f"{label} active color", "kind": "color", "default": "#7fc8ff"},
         {"path": f"{prefix}/inactive-color", "label": f"{label} inactive color", "kind": "color", "default": "#505050"},
         {"path": f"{prefix}/urgent-color", "label": f"{label} urgent color", "kind": "color", "default": "#9b0000"},
+        *_gradients(prefix, label),
     ]
+
+
+# Colour spaces a gradient can blend through (`in=`); srgb is niri's default.
+GRADIENT_SPACES = ["srgb", "srgb-linear", "oklab", "oklch shorter hue", "oklch longer hue",
+                   "oklch increasing hue", "oklch decreasing hue"]
+GRADIENT_RELATIVE = ["window", "workspace-view"]   # `window` is niri's default: no relative-to
+
+
+def _gradients(prefix: str, label: str) -> list[dict]:
+    """active-, inactive- and urgent-gradient, which win over the colours of the same block."""
+    starts = {"active": ("#80c8ff", "#bbddff"), "inactive": ("#505050", "#808080"), "urgent": ("#880000", "#aa3333")}
+    return [{"path": f"{prefix}/{state}-gradient", "label": f"{label} {state} gradient", "kind": "gradient",
+             "default": {"from": a, "to": b, "angle": 45, "rel": "window", "in": "srgb"},
+             "overrides": f"{prefix}/{state}-color"}
+            for state, (a, b) in starts.items()]
 
 
 def _effect(prefix: str, label: str) -> list[dict]:
@@ -94,6 +111,8 @@ PROPS = [
     {"path": "shadow/draw-behind-window", "label": "Shadow behind window", "kind": "bool", "default": True},
     {"path": "tab-indicator/active-color", "label": "Tab active color", "kind": "color", "default": "#7fc8ff"},
     {"path": "tab-indicator/inactive-color", "label": "Tab inactive color", "kind": "color", "default": "#505050"},
+    {"path": "tab-indicator/urgent-color", "label": "Tab urgent color", "kind": "color", "default": "#9b0000"},
+    *_gradients("tab-indicator", "Tab"),
     *_effect("background-effect", "Background "),
     {"path": "popups/opacity", "label": "Pop-up opacity", "kind": "float", "default": 0.9, "min": 0, "max": 1},
     {"path": "popups/geometry-corner-radius", "label": "Pop-up corner radius", "kind": "kdl", "default": "15"},

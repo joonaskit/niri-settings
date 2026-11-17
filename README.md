@@ -132,6 +132,12 @@ rule's name is the first line of the `//` comment right above it.
 - Select a window to see which rules apply to it and the merged values. Later rules win,
   and the `focus-ring`, `border`, `shadow`, `tab-indicator`, `background-effect` and
   `popups` blocks merge child by child. "Pick a window…" uses `niri msg pick-window`.
+- Gradients (`active-`, `inactive-` and `urgent-gradient` in `focus-ring`, `border` and
+  `tab-indicator`) get from and to colours, a whole-degree angle, what they are relative
+  to and the colour space they blend in. niri's defaults (angle 180, per window, srgb) are
+  left out of the file. The preview strip blends in sRGB, so it is only close for other
+  spaces. A colour in the same block says the gradient wins over it. A gradient with
+  other props shows as KDL.
 
 ## Layer rules
 

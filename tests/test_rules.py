@@ -726,6 +726,59 @@ class View(Base):
         v.removeProp("focus-ring/state")
         self.assertIsNone(rl.get_prop(self.config.rules("window-rule")[1], "focus-ring"))
 
+    def test_gradient_editor(self):
+        v = self.view
+        v.select(1)
+        v.addProp("border/active-color")
+        v.addProp("border/active-gradient")
+        # the default from the schema, written as niri spells it
+        self.assertIn('border { active-color "#7fc8ff"; active-gradient from="#80c8ff" to="#bbddff" angle=45; }',
+                      self.text())
+        items = {p["path"]: p for p in v.detail["always"]}
+        grad = items["border/active-gradient"]
+        self.assertEqual(grad["kind"], "gradient")
+        self.assertTrue(grad["wide"])
+        self.assertEqual(grad["value"], {"from": "#80c8ff", "to": "#bbddff", "angle": 45,
+                                         "rel": "window", "in": "srgb"})
+        self.assertEqual(items["border/active-color"]["note"], "Border active gradient wins over this")
+        # non-default fields are written; niri's defaults are left out again
+        v.setProp("border/active-gradient", dict(grad["value"], rel="workspace-view", **{"in": "oklch longer hue"}))
+        self.assertIn('active-gradient from="#80c8ff" to="#bbddff" angle=45 relative-to="workspace-view" '
+                      'in="oklch longer hue";', self.text())
+        v.setProp("border/active-gradient", {"from": "#f00", "to": "#00f", "angle": 180, "rel": "window", "in": "srgb"})
+        self.assertIn('active-gradient from="#f00" to="#00f"; }', self.text())
+        items = {p["path"]: p for p in v.detail["always"]}
+        self.assertEqual(items["border/active-gradient"]["value"]["angle"], 180)
+        v.setProp("border/active-gradient", {"from": "", "to": "#00f", "angle": 180, "rel": "window", "in": "srgb"})
+        self.assertIn("needs a from and a to colour", v.detail["error"])
+        v.setProp("border/active-gradient", {"from": "#f00", "to": "#00f", "angle": "30.5", "rel": "window", "in": "srgb"})
+        self.assertIn("whole number of degrees", v.detail["error"])          # niri rejects 30.5
+
+    @unittest.skipUnless(HAVE_NIRI, "niri is not installed")
+    def test_niri_accepts_every_property(self):
+        v = self.view
+        v.newRule("blank")
+        for p in rl.WINDOW.PROPS:
+            v.addProp(p["path"])
+            self.assertEqual(v.detail["error"], "", p["path"])
+        v.setProp("border/active-gradient", {"from": "#f00f", "to": "#0f05", "angle": 30,
+                                             "rel": "workspace-view", "in": "oklch longer hue"})
+        self.assertEqual(v.detail["error"], "")
+        ok, message = self.config.validate()
+        self.assertTrue(ok, message)
+
+    def test_gradient_the_editor_cannot_show_falls_back_to_kdl(self):
+        v = self.view
+        v.select(1)
+        # no `to`, and a colour space niri does not have: shown as KDL
+        self.model.set_prop(1, "tab-indicator/urgent-gradient", {"args": [], "props": {"from": "#800", "angle": 45}})
+        self.model.set_prop(1, "focus-ring/inactive-gradient",
+                            {"args": [], "props": {"from": "#800", "to": "#a33", "in": "hsl"}})
+        v._refresh()
+        kinds = {p["path"]: p["kind"] for p in v.detail["always"]}
+        self.assertEqual(kinds["tab-indicator/urgent-gradient"], "kdl")
+        self.assertEqual(kinds["focus-ring/inactive-gradient"], "kdl")
+
     def test_matcher_editing(self):
         v = self.view
         v.select(1)
