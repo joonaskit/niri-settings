@@ -159,6 +159,19 @@ class CoreEdits(Base):
         self.assertIn("\n\nwindow-rule {\n    // This app-id", self.text())
         self.assertEqual(cfg.pending_count(), 2)
 
+    def test_clearing_a_multi_line_name_keeps_the_explanation(self):
+        cfg = self.load()
+        self.model.rename(0, "")
+        # a bare // stands in for the name, so the next line does not become it
+        self.assertIn("//\n// by setting an empty default-column-width.\nwindow-rule {\n", self.text())
+        self.assertEqual(cfg.rules("window-rule")[0]["comment"], "")
+        self.assertEqual(rl.title(cfg.rules("window-rule")[0]), "org.wezfurlong.wezterm")
+        # naming it again fills the bare // back in
+        self.model.rename(0, "WezTerm fix")
+        self.assertIn("\n// WezTerm fix\n// by setting an empty default-column-width.\nwindow-rule {\n",
+                      self.text())
+        self.assertNotIn("//\n// WezTerm fix", self.text())
+
     def test_rule_in_included_file_is_edited_there(self):
         self.load(INCLUDES)
         colors = os.path.join(os.path.dirname(self.main), "colors.kdl")
