@@ -4,11 +4,37 @@ A settings app for the [niri](https://github.com/YaLTeR/niri) compositor. It edi
 KDL config in place, keeps comments and formatting, and never writes a file that
 `niri validate` rejects.
 
+![Key bindings page: niri's binds drawn on a keyboard map, with the selected key's action on the right](docs/screenshots/key-bindings.png)
+
+| Displays | Window rules | Layout |
+| --- | --- | --- |
+| ![Displays page with the output arrangement and its mode, scale and transform](docs/screenshots/displays.png) | ![Window rules page matching a rule against open windows](docs/screenshots/window-rules.png) | ![Layout page with a live preview of gaps and the focus ring](docs/screenshots/layout.png) |
+
 ## Install
 
-**Fedora.** Build the RPM from this repository (see `packaging/README.md`), or install it
-from the COPR repository once one is published, then start **niri settings** from your app
-launcher. It needs `niri`, `python3-pyside6`, `python3-regex` and `libxkbcommon`, which the package pulls in.
+**Fedora (RPM).** Every [release](https://github.com/joonaskit/niri-settings/releases)
+has a ready-built noarch RPM, built and tested on Fedora 44. Install it with dnf, which
+pulls in `niri`, `python3-pyside6`, `python3-regex` and `libxkbcommon`:
+
+```
+sudo dnf install https://github.com/joonaskit/niri-settings/releases/download/v0.1.0/niri-settings-0.1.0-1.fc44.noarch.rpm
+```
+
+or download the `.noarch.rpm` from the release page and run
+`sudo dnf install ./niri-settings-*.noarch.rpm`. Then start **niri settings** from your
+app launcher, or run `niri-settings`. To update, install the RPM of the newer release the
+same way. A COPR repository with automatic updates is planned.
+
+To build the RPM yourself, see `packaging/README.md`.
+
+**Other distributions.** Each release also has a wheel. Install your distribution's
+PySide6 and `regex` packages, then:
+
+```
+pip install --user niri_settings-0.1.0-py3-none-any.whl
+```
+
+This installs the `niri-settings` command, but no desktop entry or icon.
 
 **From source**, with Python 3.11 or newer:
 
@@ -50,7 +76,8 @@ python3 -m unittest discover -s tests -t .
 ruff check niri_settings tests
 ```
 
-CI runs both on every pull request. Releases are cut with `scripts/release.sh`; see
+CI runs both on every pull request. `scripts/screenshots.py` re-renders the pictures in
+`docs/screenshots/` (it needs a running niri and never touches your config). Releases are cut with `scripts/release.sh`; see
 `packaging/README.md`.
 
 ## Displays
