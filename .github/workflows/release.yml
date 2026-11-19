@@ -1,12 +1,21 @@
 name: Release
 
-# Runs when scripts/release.sh pushes a v<version> tag.
+# Runs when scripts/release.sh pushes a v<version> tag. Run it by hand
+# (Actions → Release → Run workflow) to retry a tag whose release failed.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v0.1.0"
+        required: true
 
 permissions:
   contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   release:
@@ -20,12 +29,17 @@ jobs:
           pyproject-rpm-macros "dnf-command(builddep)"
       - uses: actions/checkout@v4
         with:
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
+      # The checkout belongs to another uid than the container's root, and git
+      # refuses to work in it until it is marked safe (the srpm Makefile runs git).
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Check the tag matches the version
         run: |
           version=$(sed -n 's/^Version:[[:space:]]*//p' packaging/niri-settings.spec)
-          test "v$version" = "$GITHUB_REF_NAME" || {
-            echo "::error::tag $GITHUB_REF_NAME does not match spec version $version"; exit 1; }
+          test "v$version" = "$TAG" || {
+            echo "::error::tag $TAG does not match spec version $version"; exit 1; }
       - name: Build sdist and wheel
         run: python3 -m build --no-isolation --outdir dist .
       - name: Build source and binary RPM
@@ -42,8 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git config --global --add safe.directory "$PWD"
-          notes=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "niri settings ${GITHUB_REF_NAME#v}" \
+          notes=$(git tag -l --format='%(contents:body)' "$TAG")
+          gh release create "$TAG" dist/* \
+            --title "niri settings ${TAG#v}" \
             --notes "$notes" --generate-notes --verify-tag
