@@ -21,6 +21,8 @@ podman run --rm -v "$PWD":/src:Z -w /src registry.fedoraproject.org/fedora:44 ba
   dnf -y install git rpm-build make python3-devel python3-setuptools pyproject-rpm-macros "dnf-command(builddep)" &&
   make -f .copr/Makefile srpm &&
   dnf -y builddep dist/*.src.rpm &&
+  { rpmbuild -rr dist/*.src.rpm --define "_srcrpmdir /tmp/br" || true; } &&
+  dnf -y builddep /tmp/br/*.buildreqs.nosrc.rpm &&
   rpmbuild --rebuild dist/*.src.rpm --define "_rpmdir /src/dist"'
 ```
 
@@ -41,9 +43,32 @@ only tags. Users then install with `dnf copr enable <owner>/niri-settings` and
 
 ## Releasing a version
 
-1. Bump the version in `pyproject.toml`, `niri_settings/__init__.py`,
-   `packaging/niri-settings.spec` (and its `%changelog`) and add a `<release>` to
-   `data/io.github.joonaskit.NiriSettings.metainfo.xml`. `tests/test_release.py` fails if
-   they disagree.
-2. Run the tests, commit, then tag: `git tag v0.1.0 && git push --tags`. The spec's
-   `Source` is GitHub's archive of that tag.
+```
+scripts/release.sh 0.2.0 "One line per change.
+Another change."
+```
+
+From a clean `main`, the script:
+
+1. checks the version is newer than the current one and the tag does not exist yet;
+2. writes it to `pyproject.toml`, `niri_settings/__init__.py` and the spec (`Version`,
+   `Release: 1`, a `%changelog` entry), and adds a `<release>` to the metainfo, with one
+   changelog bullet or paragraph per line of the notes;
+3. runs the tests (`tests/test_release.py` checks the four files agree), commits
+   "Release 0.2.0" and makes an annotated `v0.2.0` tag;
+4. asks before pushing the branch and the tag (`--yes` skips the question, `--no-push`
+   stops after the local tag).
+
+The pushed tag starts `.github/workflows/release.yml`. In a Fedora container it builds the
+sdist, wheel, source RPM and noarch RPM (whose `%check` runs the whole suite against
+Fedora's niri), then publishes a GitHub release with them attached. The notes are the
+tag's notes followed by GitHub's generated list of merged pull requests. The spec's
+`Source` is GitHub's archive of the tag, so COPR can build it once the tag exists.
+
+If a release fails after tagging, fix it and cut the next patch version rather than
+moving a published tag.
+
+## CI
+
+`.github/workflows/ci.yml` runs `ruff check` and the test suite in a Fedora container on
+every pull request and every push to `main`.

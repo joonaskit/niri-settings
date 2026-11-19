@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Fedora ships niri, so `niri validate` checks every schema default for real.
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - name: Install dependencies
+        run: >
+          dnf -y install --setopt=install_weak_deps=False
+          git niri python3 python3-pyside6 python3-regex libxkbcommon
+          appstream desktop-file-utils ruff
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: ruff check niri_settings tests
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python3 -m unittest discover -s tests -t . -v
