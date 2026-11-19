@@ -18,6 +18,24 @@
       <li>A source editor, a diff of unsaved changes and snapshots of every save</li>
     </ul>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Key bindings on a keyboard map</caption>
+      <image type="source" width="1280" height="820">https://raw.githubusercontent.com/joonaskit/niri-settings/main/docs/screenshots/key-bindings.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Arrange displays and try a mode before keeping it</caption>
+      <image type="source" width="1280" height="820">https://raw.githubusercontent.com/joonaskit/niri-settings/main/docs/screenshots/displays.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Window rules matched against open windows</caption>
+      <image type="source" width="1280" height="820">https://raw.githubusercontent.com/joonaskit/niri-settings/main/docs/screenshots/window-rules.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Layout settings with a live preview</caption>
+      <image type="source" width="1280" height="820">https://raw.githubusercontent.com/joonaskit/niri-settings/main/docs/screenshots/layout.png</image>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">io.github.joonaskit.NiriSettings.desktop</launchable>
   <url type="homepage">https://github.com/joonaskit/niri-settings</url>
   <url type="bugtracker">https://github.com/joonaskit/niri-settings/issues</url>
