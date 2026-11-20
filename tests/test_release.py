@@ -206,3 +206,26 @@ class Packaging(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QmlCacheTest(unittest.TestCase):
+    """RPM clamps mtimes, so Qt's own staleness check can miss an upgrade."""
+
+    def test_cache_cleared_only_when_sources_change(self):
+        from niri_settings.__main__ import refresh_qml_cache
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        qml, cache = os.path.join(tmp, "qml"), os.path.join(tmp, "cache")
+        os.makedirs(qml)
+        os.makedirs(os.path.join(cache, "qmlcache"))
+        with open(os.path.join(qml, "Main.qml"), "w") as f:
+            f.write("Item {}")
+        self.assertTrue(refresh_qml_cache(cache, qml))
+        self.assertFalse(os.path.exists(os.path.join(cache, "qmlcache")))
+        os.makedirs(os.path.join(cache, "qmlcache"))
+        self.assertFalse(refresh_qml_cache(cache, qml))
+        self.assertTrue(os.path.exists(os.path.join(cache, "qmlcache")))
+        with open(os.path.join(qml, "Main.qml"), "w") as f:
+            f.write("Rectangle {}")
+        self.assertTrue(refresh_qml_cache(cache, qml))
+        self.assertFalse(os.path.exists(os.path.join(cache, "qmlcache")))

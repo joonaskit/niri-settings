@@ -453,7 +453,13 @@ class Config:
         self.dropped = []
         if self.write_mode == MANAGED and not self.managed_enabled:
             self.write_mode = IN_PLACE
+        included = {os.path.normpath(f) for f in tree.files()}
         for path, value in mine.items():
+            if path.startswith(FILE) and os.path.normpath(path[len(FILE):]) not in included:
+                # The outside edit removed the include; there is nowhere to
+                # put this file's unsaved text any more.
+                self.dropped.append(f"{os.path.basename(path[len(FILE):])} is no longer included")
+                continue
             disk = self._value(path)
             if disk == value:
                 continue
