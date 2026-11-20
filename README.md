@@ -17,7 +17,7 @@ has a ready-built noarch RPM, built and tested on Fedora 44. Install it with dnf
 pulls in `niri`, `python3-pyside6`, `python3-regex` and `libxkbcommon`:
 
 ```
-sudo dnf install https://github.com/joonaskit/niri-settings/releases/download/v0.1.0/niri-settings-0.1.0-1.fc44.noarch.rpm
+sudo dnf install https://github.com/joonaskit/niri-settings/releases/download/v0.1.1/niri-settings-0.1.1-1.fc44.noarch.rpm
 ```
 
 or download the `.noarch.rpm` from the release page and run
@@ -31,7 +31,7 @@ To build the RPM yourself, see `packaging/README.md`.
 PySide6 and `regex` packages, then:
 
 ```
-pip install --user niri_settings-0.1.0-py3-none-any.whl
+pip install --user niri_settings-0.1.1-py3-none-any.whl
 ```
 
 This installs the `niri-settings` command, but no desktop entry or icon.
