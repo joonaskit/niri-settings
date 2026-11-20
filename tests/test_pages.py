@@ -494,6 +494,19 @@ class ReviewFixes(Base):
         ok, _ = self.cfg.validate()
         self.assertFalse(ok)
 
+    def test_rebase_drops_an_edit_to_a_file_no_longer_included(self):
+        self.load()
+        other = os.path.join(self.tmp, "niri", "extra.kdl")
+        with open(other, "w", encoding="utf-8") as fh:
+            fh.write("layout { gaps 4; }\n")
+        base = self.text()
+        self.write("config.kdl", base + 'include "extra.kdl"\n')
+        self.cfg.reload()
+        self.cfg.set_text(other, "layout { gaps 8; }\n")
+        self.write("config.kdl", base)
+        self.assertEqual(self.cfg.rebase(), [])
+        self.assertEqual(self.cfg.dropped, ["extra.kdl is no longer included"])
+
     def test_rebase_keeps_going_when_a_change_cannot_be_redone(self):
         from unittest import mock
         self.load()
