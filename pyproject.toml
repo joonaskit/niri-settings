@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "niri-settings"
-version = "0.1.0"
+version = "0.1.1"
 description = "A settings app for the niri compositor that edits its KDL config safely"
 readme = "README.md"
 license = "GPL-3.0-or-later"

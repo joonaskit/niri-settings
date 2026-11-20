@@ -57,6 +57,12 @@
     <category>Settings</category>
   </categories>
   <releases>
+    <release version="0.1.1" date="2026-11-20">
+      <description>
+        <p>Fix a startup error after upgrading: clear the QML cache when the app&#x27;s QML files change.</p>
+        <p>Fix a crash when an outside edit removes an include that has unsaved changes.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-11-16">
       <description>
         <p>First release.</p>
