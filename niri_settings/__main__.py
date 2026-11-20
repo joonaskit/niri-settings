@@ -2,9 +2,12 @@
 
 import argparse
 import glob
+import hashlib
 import os
+import shutil
 import sys
 
+from PySide6.QtCore import QStandardPaths
 from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -17,6 +20,38 @@ from .viewmodel import Backend
 
 APP_ID = "io.github.joonaskit.NiriSettings"  # desktop file, icon and Wayland app-id
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def refresh_qml_cache(cache_dir: str, qml_dir: str) -> bool:
+    """Drop Qt's compiled QML cache when the QML sources have changed.
+
+    Qt trusts a cached .qmlc while the source's mtime matches, but RPM builds
+    clamp every mtime to the changelog date, so an upgrade can keep loading
+    stale components. Key the cache on a hash of the sources instead.
+    Returns True when the cache was cleared."""
+    digest = hashlib.sha256()
+    for name in sorted(os.listdir(qml_dir)):
+        path = os.path.join(qml_dir, name)
+        if os.path.isfile(path):
+            digest.update(name.encode() + b"\0")
+            with open(path, "rb") as f:
+                digest.update(f.read())
+    stamp = os.path.join(cache_dir, "qml-sources.sha256")
+    want = digest.hexdigest()
+    try:
+        with open(stamp) as f:
+            if f.read().strip() == want:
+                return False
+    except OSError:
+        pass
+    shutil.rmtree(os.path.join(cache_dir, "qmlcache"), ignore_errors=True)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(stamp, "w") as f:
+            f.write(want + "\n")
+    except OSError:
+        pass  # no writable cache dir; Qt will cope without one
+    return True
 
 
 def main() -> int:
@@ -46,6 +81,7 @@ def main() -> int:
     app.aboutToQuit.connect(displays.shutdown)
     app.aboutToQuit.connect(backend.shutdown)
 
+    refresh_qml_cache(QStandardPaths.writableLocation(QStandardPaths.CacheLocation), os.path.join(HERE, "qml"))
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("displays", displays)
