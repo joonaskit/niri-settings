@@ -28,7 +28,13 @@ SECTIONS = [
                          ("misc", "Miscellaneous"), ("files", "Config files")]),
 ]
 
-SAMPLE_COLUMNS = [("Terminal", 1 / 3), ("Firefox", None), ("Editor", None), ("Files", 1 / 3)]
+# Setting kinds by how many config paths a card edits (see SettingCard.qml).
+_LEAF_KINDS = {"slider", "segmented", "flag", "number", "decimal", "text", "color", "select", "bool"}
+_SWITCH_KINDS = {"onoff", "offflag"}
+# The kinds whose card has a Reset link; Reset group removes only these.
+_RESETTABLE_KINDS = {"slider", "segmented", "number", "decimal", "text", "color", "select", "bool", "xy"}
+
+SAMPLE_COLUMNS =[("Terminal", 1 / 3), ("Firefox", None), ("Editor", None), ("Files", 1 / 3)]
 
 
 def _props_text(node) -> str:
@@ -597,6 +603,90 @@ class Backend(QObject):
         """Remove a setting so niri's default applies."""
         if self.config.get(path) is not None:
             self._apply_edit(lambda: self.config.remove(path))
+
+    # -- group panels: what is set, what is unsaved
+
+    def _touched(self, path: str, kind: str) -> dict[str, object]:
+        """The unsaved edits one setting card made: path -> saved value."""
+        unsaved = self.config.unsaved()
+        if kind in _LEAF_KINDS:
+            mine = [path]
+        elif kind in _SWITCH_KINDS:
+            mine = [path, path + "/on", path + "/off"]
+        elif kind == "colors":
+            mine = [p for p in unsaved if p.startswith(path + "/")
+                    and p[len(path) + 1:].split("-", 1)[0] in ("active", "inactive", "urgent")]
+        else:
+            mine = [p for p in unsaved if p == path or p.startswith(path + "/")]
+        return {p: unsaved[p] for p in mine if p in unsaved}
+
+    def _summary(self, s: dict) -> str:
+        """One set setting as a few words for a collapsed group."""
+        path, kind, label = s["path"], s["kind"], s["label"]
+        if kind in _SWITCH_KINDS:
+            on = (self.config.is_on(path, s.get("default", False)) if kind == "onoff"
+                  else self.isEnabled(path, s.get("default", True)))
+            return f"{label} {'on' if on else 'off'}"
+        if kind not in _LEAF_KINDS:
+            return label
+        value = self.config.get(path)
+        if kind == "flag":
+            return label if value is True else f"{label} off"
+        if kind == "bool":
+            return f"{label} {'on' if value else 'off'}"
+        unit = s.get("unit", "")
+        return f"{label} {_show(value)}" + (f" {unit}" if unit else "")
+
+    def _group(self, page_id: str, index: int) -> list[dict]:
+        groups = page_schema.PAGES.get(page_id, {}).get("groups", [])
+        return groups[index]["settings"] if 0 <= index < len(groups) else []
+
+    @Slot(str, str, result="QVariantMap")
+    def settingState(self, path, kind):
+        """{dirty, was, undoable} for a setting card's unsaved marker."""
+        touched = self._touched(path, kind)
+        single = kind in _LEAF_KINDS and list(touched) == [path]
+        return {"dirty": bool(touched),
+                "was": (_show(touched[path]) if touched[path] is not None else "niri default") if single else "",
+                "undoable": bool(touched) and (kind in _LEAF_KINDS or kind in _SWITCH_KINDS)}
+
+    @Slot(str, str)
+    def undoSetting(self, path, kind):
+        """Put a setting back to its saved value."""
+        touched = self._touched(path, kind)
+        if not touched or not (kind in _LEAF_KINDS or kind in _SWITCH_KINDS):
+            return
+
+        def apply():
+            for p, old in touched.items():
+                if old is None:
+                    self.config.remove(p)
+                else:
+                    self.config.set(p, old)
+        self._apply_edit(apply)
+
+    @Slot(str, int, result="QVariantMap")
+    def groupState(self, page_id, index):
+        """{set, unsaved, resettable, summary} for one group of a settings page."""
+        settings = self._group(page_id, index)
+        is_set = [s for s in settings if self.config.source(s["path"])]
+        words = [self._summary(s) for s in is_set]
+        return {"set": len(is_set),
+                "unsaved": sum(1 for s in settings if self._touched(s["path"], s["kind"])),
+                "resettable": sum(1 for s in is_set if s["kind"] in _RESETTABLE_KINDS),
+                "summary": " · ".join(words) if words else "All niri defaults"}
+
+    @Slot(str, int)
+    def resetGroup(self, page_id, index):
+        """Remove every simple value a group sets, so niri's defaults apply (unsaved)."""
+        paths = [s["path"] for s in self._group(page_id, index)
+                 if s["kind"] in _RESETTABLE_KINDS and self.config.get(s["path"]) is not None]
+
+        def apply():
+            for p in paths:
+                self.config.remove(p)
+        if paths:
+            self._apply_edit(apply)
 
     @Slot(str, "QVariant")
     def setDecimal(self, path, value):

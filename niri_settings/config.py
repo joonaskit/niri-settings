@@ -171,6 +171,10 @@ class Config:
         """Unsaved changes: path -> new value (None means removed)."""
         return {p: self._value(p) for p in self._baseline}
 
+    def unsaved(self) -> dict[str, object]:
+        """Edited paths -> the value they had when last saved (None: unset)."""
+        return dict(self._baseline)
+
     def pending_count(self) -> int:
         """Unsaved changes, counting each changed rule once."""
         count = 0

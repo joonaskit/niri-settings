@@ -20,7 +20,9 @@ Card {
     }
 
     readonly property string error: { rev; return backend.errorFor(path, setting.kind) }
-    border.color: error ? Theme.warnBorder : Theme.line
+    // Unsaved edit on this setting: {dirty, was, undoable}
+    readonly property var unsaved: { rev; return backend.settingState(path, setting.kind) }
+    border.color: error ? Theme.warnBorder : unsaved.dirty ? Theme.accent : flat ? "transparent" : Theme.line
 
     Loader {
         Layout.fillWidth: true
@@ -29,6 +31,24 @@ Card {
                             text: textKind, color: textKind, select: select, bool: boolKind,
                             offflag: offflag, xy: xy, animation: animation, workspaces: workspaces,
                             startup: startup, environment: environment, colors: colors })[card.setting.kind]
+    }
+    RowLayout {  // what an unsaved edit replaced, and the way back
+        Layout.fillWidth: true
+        visible: card.unsaved.dirty
+        spacing: 6
+        Text {
+            Layout.fillWidth: true
+            text: "Unsaved" + (card.unsaved.was ? " · was " + card.unsaved.was : "")
+            elide: Text.ElideRight
+            font.pixelSize: Theme.hint
+            color: Theme.muted
+        }
+        LinkButton {
+            visible: card.unsaved.undoable
+            text: "Undo"
+            Accessible.name: "Undo the unsaved change to " + card.setting.label
+            onClicked: backend.undoSetting(card.path, card.setting.kind)
+        }
     }
     Text {  // niri's own message, on the setting that caused it
         Layout.fillWidth: true
@@ -40,11 +60,22 @@ Card {
         Accessible.role: Accessible.AlertMessage
     }
 
+    // The label; a dot in front marks an unsaved edit.
     component Title: Text {
+        id: title
         font.pixelSize: Theme.body
         font.weight: Font.DemiBold
         color: Theme.text
         wrapMode: Text.Wrap
+        leftPadding: card.unsaved.dirty ? 15 : 0
+        Rectangle {
+            visible: card.unsaved.dirty
+            width: 7
+            height: 7
+            radius: 3.5
+            color: Theme.accent
+            y: Math.round((title.contentHeight / Math.max(1, title.lineCount) - height) / 2)
+        }
     }
     // `section › key · file:line`: the file:line opens the source editor
     // there, and Reset removes the setting so niri's default applies.
@@ -59,6 +90,8 @@ Card {
         spacing: 6
         Text {
             text: sh.parts[0]
+            width: Math.min(implicitWidth, sh.width)
+            elide: Text.ElideMiddle
             font.family: Theme.mono
             font.pixelSize: Theme.hint
             color: Theme.muted
