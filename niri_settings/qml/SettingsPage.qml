@@ -183,6 +183,7 @@ Item {
                     setting: modelData
                     flat: true
                     Layout.preferredWidth: 1
+                    Layout.fillHeight: true  // a row's cards share its height
                     Layout.columnSpan: page.wide.indexOf(modelData.kind) >= 0 && grid.columns > 1
                                        && modelData.kind !== "animation" ? 2 : 1
                 }

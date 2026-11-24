@@ -127,6 +127,7 @@ ScrollView {
                         required property var modelData
                         setting: modelData
                         Layout.preferredWidth: 1
+                        Layout.fillHeight: true  // a row's cards share its height
                     }
                 }
             }

@@ -16,7 +16,10 @@ Rectangle {
     border.color: flat ? "transparent" : Theme.line
     ColumnLayout {
         id: column
-        anchors.fill: parent
+        // Top-anchored: a card stretched to its grid row keeps its content at the top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
         anchors.margins: 16
         spacing: 10
     }
