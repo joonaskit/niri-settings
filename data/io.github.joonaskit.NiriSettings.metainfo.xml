@@ -57,6 +57,14 @@
     <category>Settings</category>
   </categories>
   <releases>
+    <release version="0.2.0" date="2026-11-24">
+      <description>
+        <p>Settings pages show each group as a bordered panel whose header sticks while scrolling and folds the group to a summary.</p>
+        <p>Wide windows list the page&#x27;s groups in an On this page index.</p>
+        <p>Each setting marks an unsaved change and offers Undo; groups count set and unsaved values and can be reset.</p>
+        <p>Setting cards in one row share the same height.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-11-20">
       <description>
         <p>Fix a startup error after upgrading: clear the QML cache when the app&#x27;s QML files change.</p>
