@@ -1,7 +1,7 @@
 %global appid io.github.joonaskit.NiriSettings
 
 Name:           niri-settings
-Version:        0.1.1
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Settings app for the niri compositor
 
@@ -71,6 +71,12 @@ export QT_QPA_PLATFORM=offscreen
 %{_metainfodir}/%{appid}.metainfo.xml
 
 %changelog
+* Tue Nov 24 2026 Joonas Kitunen - 0.2.0-1
+- Settings pages show each group as a bordered panel whose header sticks while scrolling and folds the group to a summary.
+- Wide windows list the page's groups in an On this page index.
+- Each setting marks an unsaved change and offers Undo; groups count set and unsaved values and can be reset.
+- Setting cards in one row share the same height.
+
 * Fri Nov 20 2026 Joonas Kitunen - 0.1.1-1
 - Fix a startup error after upgrading: clear the QML cache when the app's QML files change.
 - Fix a crash when an outside edit removes an include that has unsaved changes.
