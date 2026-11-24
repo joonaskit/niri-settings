@@ -16,9 +16,8 @@ from . import __version__
 from .binds_view import BindsView
 from .displays_view import DisplaysView
 from .rules_view import LayerRulesView, RulesView
-from .viewmodel import Backend
+from .viewmodel import APP_ID, Backend  # APP_ID: desktop file, icon and Wayland app-id
 
-APP_ID = "io.github.joonaskit.NiriSettings"  # desktop file, icon and Wayland app-id
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
