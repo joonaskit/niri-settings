@@ -216,6 +216,17 @@ class Settings(Base):
                          ["input/trackball/natural-scroll"])
         self.assertEqual(b.searchSettings("  "), [])
 
+    def test_about(self):
+        from niri_settings import __version__
+        b = self.load()
+        self.assertEqual(b.about["version"], __version__)
+        self.assertTrue(b.about["repo"].startswith("https://github.com/"))
+        info = {r["label"]: r["value"] for r in b.systemInfo}
+        self.assertEqual(info["niri settings"], __version__)
+        self.assertEqual(info["niri"], "not connected")  # loaded offline
+        self.assertTrue(info["Config"].endswith("niri/config.kdl"))
+        self.assertEqual(info["Write mode"], b.writeMode)
+
 
 class SourceEditor(Base):
     def test_text_edit_is_one_pending_change(self):

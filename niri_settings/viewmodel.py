@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import math
 import os
+import platform
 import shlex
 import time
 
-from PySide6.QtCore import (Property, QFileSystemWatcher, QObject, QTimer, Signal, Slot)
+import PySide6
+from PySide6.QtCore import (Property, QFileSystemWatcher, QObject, QTimer, QUrl, Signal, Slot, qVersion)
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QJSValue
 
-from . import gradients, ipc, niri_core
+from . import __version__, gradients, ipc, niri_core
 from .config import FILE, MANAGED, RULES, Config, ReadOnlyError
 from .schema import layout as layout_schema
 from .schema import pages as page_schema
@@ -33,6 +36,20 @@ _LEAF_KINDS = {"slider", "segmented", "flag", "number", "decimal", "text", "colo
 _SWITCH_KINDS = {"onoff", "offflag"}
 # The kinds whose card has a Reset link; Reset group removes only these.
 _RESETTABLE_KINDS = {"slider", "segmented", "number", "decimal", "text", "color", "select", "bool", "xy"}
+
+REPO_URL = "https://github.com/joonaskit/niri-settings"
+APP_ID = "io.github.joonaskit.NiriSettings"
+
+
+def _icon_url() -> str:
+    """The app icon: from a source checkout, else the installed theme icon, else ""."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(here, os.pardir, "icons", "niri-settings.svg"),
+                 os.path.join("/usr/share/icons/hicolor/scalable/apps", APP_ID + ".svg")):
+        if os.path.isfile(path):
+            return QUrl.fromLocalFile(os.path.normpath(path)).toString()
+    return ""
+
 
 SAMPLE_COLUMNS =[("Terminal", 1 / 3), ("Firefox", None), ("Editor", None), ("Files", 1 / 3)]
 
@@ -210,6 +227,36 @@ class Backend(QObject):
         if self._version:
             return f"niri {self._version} · connected via IPC"
         return "niri not running · editing files only"
+
+    # -- about
+
+    @Property("QVariantMap", constant=True)
+    def about(self):
+        return {"version": __version__, "icon": _icon_url(), "repo": REPO_URL,
+                "issues": REPO_URL + "/issues", "releases": REPO_URL + "/releases",
+                "license": REPO_URL + "/blob/main/LICENSE"}
+
+    @Property("QVariantList", notify=changed)
+    def systemInfo(self):
+        """Label/value rows for bug reports; the config path and write mode can change."""
+        home = os.path.expanduser("~")
+        main = self.config.main
+        return [
+            {"label": "niri settings", "value": __version__},
+            {"label": "niri", "value": self._version or "not connected"},
+            {"label": "Config", "value": ("~" + main[len(home):]) if main.startswith(home) else main},
+            {"label": "Write mode", "value": self.config.write_mode},
+            {"label": "Qt", "value": f"{qVersion()} (PySide6 {PySide6.__version__})"},
+            {"label": "Python", "value": platform.python_version()},
+        ]
+
+    @Slot()
+    def copySystemInfo(self):
+        rows = self.systemInfo
+        width = max(len(r["label"]) for r in rows)
+        QGuiApplication.clipboard().setText("\n".join(f"{r['label']:<{width}}  {r['value']}" for r in rows) + "\n")
+        self._notice = "Copied system info to the clipboard"
+        self.changed.emit()
 
     @Property(int, notify=changed)
     def pendingCount(self):

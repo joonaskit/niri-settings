@@ -23,6 +23,10 @@ ApplicationWindow {
     property var collapsedGroups: ({})
 
     function go(id) {
+        if (id === "about") {
+            currentPage = id
+            currentTitle = "About"
+        }
         var sections = backend.sections
         for (var i = 0; i < sections.length; i++)
             for (var j = 0; j < sections[i].pages.length; j++)
@@ -119,7 +123,10 @@ ApplicationWindow {
                 color: Theme.chrome
                 Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.line }
                 ScrollView {
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.bottom: aboutRule.top
                     anchors.rightMargin: 1
                     contentWidth: availableWidth
                     clip: true
@@ -184,6 +191,47 @@ ApplicationWindow {
                         Item { implicitHeight: 16 }
                     }
                 }
+                // About, pinned under the pages
+                Rectangle {
+                    id: aboutRule
+                    anchors.bottom: aboutItem.top
+                    anchors.bottomMargin: 8
+                    width: parent.width - 1
+                    height: 1
+                    color: Theme.line
+                }
+                AbstractButton {
+                    id: aboutItem
+                    readonly property bool current: window.currentPage === "about"
+                    property real radius: Theme.radiusSmall
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 13
+                    anchors.bottomMargin: 12
+                    implicitHeight: Theme.control
+                    text: "About"
+                    onClicked: window.go("about")
+                    Accessible.role: Accessible.PageTab
+                    Accessible.selected: current
+                    contentItem: Text {
+                        leftPadding: 10
+                        rightPadding: 10
+                        text: aboutItem.text
+                        font.pixelSize: Theme.body
+                        font.weight: aboutItem.current ? Font.DemiBold : Font.Normal
+                        color: aboutItem.current ? Theme.accentInk : Theme.muted
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        radius: aboutItem.radius
+                        color: aboutItem.current ? Theme.accent
+                             : aboutItem.hovered ? Theme.raised : "transparent"
+                        FocusRing { target: aboutItem }
+                    }
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                }
             }
 
             // Content
@@ -197,6 +245,7 @@ ApplicationWindow {
                                : window.currentPage === "binds" ? bindsPage
                                : window.currentPage === "window-rules" ? rulesPage
                                : window.currentPage === "layer-rules" ? layerRulesPage
+                               : window.currentPage === "about" ? aboutPage
                                : backend.pages[window.currentPage] !== undefined ? settingsPage : placeholder
             }
             Component { id: layoutPage; LayoutPage {} }
@@ -226,6 +275,7 @@ ApplicationWindow {
             Component { id: bindsPage; KeyBindingsPage {} }
             Component { id: rulesPage; RulesPage { view: rules; onOpenPage: id => window.go(id) } }
             Component { id: layerRulesPage; RulesPage { view: layerRules; onOpenPage: id => window.go(id) } }
+            Component { id: aboutPage; AboutPage {} }
             Component { id: placeholder; PlaceholderPage { title: window.currentTitle } }
         }
 
