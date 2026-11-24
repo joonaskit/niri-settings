@@ -19,6 +19,8 @@ ApplicationWindow {
     property string sourceFile: ""
     property int sourceLine: 0
     property int sourceSeq: 0
+    // Folded setting groups ("<page>/<group index>"), for as long as the app runs
+    property var collapsedGroups: ({})
 
     function go(id) {
         var sections = backend.sections
@@ -199,7 +201,18 @@ ApplicationWindow {
             }
             Component { id: layoutPage; LayoutPage {} }
             Component { id: searchPage; SearchPage { query: search.text; onOpenPage: id => window.go(id) } }
-            Component { id: settingsPage; SettingsPage { pageId: window.currentPage } }
+            Component {
+                id: settingsPage
+                SettingsPage {
+                    pageId: window.currentPage
+                    collapsed: window.collapsedGroups
+                    onToggled: key => {
+                        var c = Object.assign({}, window.collapsedGroups)
+                        c[key] = !c[key]
+                        window.collapsedGroups = c
+                    }
+                }
+            }
             Component {
                 id: filesPage
                 ConfigFilesPage {
