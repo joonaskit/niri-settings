@@ -1,7 +1,7 @@
 %global appid io.github.joonaskit.NiriSettings
 
 Name:           niri-settings
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Settings app for the niri compositor
 
@@ -71,6 +71,10 @@ export QT_QPA_PLATFORM=offscreen
 %{_metainfodir}/%{appid}.metainfo.xml
 
 %changelog
+* Thu Nov 26 2026 Joonas Kitunen - 0.2.1-1
+- An About page, pinned at the bottom of the sidebar, shows the version, links to the source, issues and release notes, and the license.
+- Its system info lists the niri, Qt and Python versions, the config path and the write mode, and copies them for a bug report.
+
 * Tue Nov 24 2026 Joonas Kitunen - 0.2.0-1
 - Settings pages show each group as a bordered panel whose header sticks while scrolling and folds the group to a summary.
 - Wide windows list the page's groups in an On this page index.

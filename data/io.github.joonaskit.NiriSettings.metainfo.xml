@@ -57,6 +57,12 @@
     <category>Settings</category>
   </categories>
   <releases>
+    <release version="0.2.1" date="2026-11-26">
+      <description>
+        <p>An About page, pinned at the bottom of the sidebar, shows the version, links to the source, issues and release notes, and the license.</p>
+        <p>Its system info lists the niri, Qt and Python versions, the config path and the write mode, and copies them for a bug report.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-24">
       <description>
         <p>Settings pages show each group as a bordered panel whose header sticks while scrolling and folds the group to a summary.</p>
